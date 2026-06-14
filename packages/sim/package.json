@@ -1,0 +1,26 @@
+{
+  "name": "@umbral/sim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "umbral-sim": "./src/cli.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "start": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@umbral/content": "workspace:*",
+    "@umbral/engine": "workspace:*",
+    "@umbral/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsx": "^4",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}
