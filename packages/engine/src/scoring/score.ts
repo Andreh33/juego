@@ -1,7 +1,9 @@
 // Pipeline de puntuacion (§7.3), orden ESTRICTO y determinista en punto fijo (§7.3.1).
 //   puntuacion = floor(FICHAS_TOTAL × MULT_TOTAL)
-// Orden: base -> (por carta: valor, mejora, sellos, onCardScored; con retriggers) ->
-//        onHandPlayed (aditivos) + bono Cordura -> ×mult de reliquias -> floor.
+// Orden: base -> (por carta: valor, mejoras ADITIVAS, sellos, onCardScored; con retriggers) ->
+//        onHandPlayed (aditivos) + bono Cordura -> TODOS los ×mult (mejoras de carta y luego
+//        reliquias, izquierda->derecha) -> floor. Principio de oro: primero todas las sumas,
+//        luego todos los ×mult.
 import type { Card } from '@umbral/shared';
 import type { FeelEvent } from '../events';
 import type { HandType } from '../types';
@@ -74,8 +76,14 @@ function applyEffect(acc: Acc, eff: Effect, card: Card | undefined): void {
   }
 }
 
-/** Mejora de carta (§7.7), aplicada en el paso 3b. Untado ×mult se aplica aqui (§7.3 paso 3b). */
-function applyEnhancement(acc: Acc, card: Card): void {
+/** Factor ×mult de la mejora Untado (§7.7). Se DIFIERE al paso 5 (no se aplica en 3b). */
+const UNTADO_XMULT = 1.5;
+
+/**
+ * Mejoras ADITIVAS de carta (§7.7), paso 3b: solo lo que suma. Los ×mult de mejora (Untado)
+ * NO se aplican aqui; se difieren al paso 5 junto a los ×mult de reliquias (§7.3).
+ */
+function applyAdditiveEnhancement(acc: Acc, card: Card): void {
   switch (card.enhancement) {
     case 'grabado':
       acc.fichas += 30n;
@@ -83,16 +91,14 @@ function applyEnhancement(acc: Acc, card: Card): void {
     case 'marca':
       acc.mult += multToFixed(4);
       break;
-    case 'untado':
-      acc.mult = xMultFixed(acc.mult, 1.5);
-      break;
     case 'cristal':
       acc.fichas += 50n;
       break;
     case 'piedra':
       acc.fichas += 50n;
       break;
-    // 'dorado' (monedas al fin de ronda) y 'espejo' (copia rango, en 3a) no suman fichas aqui.
+    // 'untado' (×mult) -> paso 5. 'dorado' (monedas al fin de ronda) y 'espejo' (copia rango,
+    // en 3a) no suman fichas aqui.
     default:
       break;
   }
@@ -111,6 +117,9 @@ export function scoreHand(input: ScoreInput): ScoreResult {
   let coinsGained = 0;
   let sanityDelta = 0;
   const events: FeelEvent[] = [];
+  // ×mult de mejoras de carta (Untado): se recogen en orden de zona jugada (y por disparo)
+  // y se aplican en el paso 5, tras todas las sumas (§7.3).
+  const cardXMults: number[] = [];
 
   // Una carta puntua si forma parte del tipo, o si es Piedra (siempre puntua, §7.7).
   const isScoring = (card: Card): boolean =>
@@ -132,7 +141,8 @@ export function scoreHand(input: ScoreInput): ScoreResult {
 
     for (let t = 0; t < triggers; t++) {
       acc.fichas += BigInt(chip); // 3a
-      applyEnhancement(acc, card); // 3b
+      applyAdditiveEnhancement(acc, card); // 3b (solo sumas; los ×mult se difieren al paso 5)
+      if (card.enhancement === 'untado') cardXMults.push(UNTADO_XMULT);
       if (card.seal === 'ocre') coinsGained += 1; // 3c
       if (card.seal === 'violeta') {
         sanityDelta -= 2;
@@ -153,7 +163,10 @@ export function scoreHand(input: ScoreInput): ScoreResult {
   if (corduraMultBonus > 0) acc.mult += multToFixed(corduraMultBonus);
   for (const r of relics) for (const eff of r.onHandPlayed ?? []) applyEffect(acc, eff, undefined);
 
-  // Paso 5: ×mult de reliquias, en orden de reliquia (el orden importa con condicionales).
+  // Paso 5: TODOS los ×mult, izquierda->derecha (§7.3): primero los de mejoras de carta
+  // (orden de la zona jugada), luego los de reliquias (orden de reliquia). El orden importa
+  // con condicionales.
+  for (const factor of cardXMults) acc.mult = xMultFixed(acc.mult, factor);
   for (const r of relics) for (const eff of r.xMult ?? []) applyEffect(acc, eff, undefined);
 
   // Paso 7: floor.
