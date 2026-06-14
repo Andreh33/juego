@@ -55,6 +55,17 @@ describe('TESTS DE ORO (§7.8)', () => {
     expect(r.fichas).toBe(115n);
     expect(r.score).toBe(1207);
   });
+
+  it('Test 3 (orden ×mult) = 270: el ×1.5 de Untado se aplica DESPUES del +4 de Marca', () => {
+    // Pareja de Q: una carta Marcada (+4 mult, aditivo) y otra Untada (×1.5, diferido al paso 5).
+    const marcada = mk('CALIZ', 12, { enh: 'marca', id: 'M' });
+    const untada = mk('LLAVE', 12, { enh: 'untado', id: 'U' });
+    const r = scoreHand({ played: [marcada, untada], handLevels: { pareja: { level: 1 } } });
+    // fichas: 10 base + 10 + 10 = 30. mult: 2 base + 4 (Marca) = 6, ×1.5 (Untado, paso 5) = 9.
+    expect(r.fichas).toBe(30n);
+    expect(r.multScaled).toBe(9_000_000n);
+    expect(r.score).toBe(270); // floor(30 × 9). Si el ×1.5 fuera ANTES del +4 seria floor(30×7)=210.
+  });
 });
 
 describe('puntuacion base', () => {

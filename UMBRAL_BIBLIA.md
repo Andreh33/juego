@@ -462,11 +462,11 @@ puntuaciónDeLaMano = floor( FICHAS_TOTAL × MULT_TOTAL )
 2. `FICHAS = fichasBase`. `MULT = multBase`.
 3. **Por cada carta que puntúa, en orden de izquierda→derecha en la zona jugada** (resolviendo retriggers, §7.6):
    a. `FICHAS += valorEnFichas(carta)`
-   b. aplicar mejora de la carta (Grabado +fichas, Marca +mult, Untado ×mult, Cristal +fichas, etc.) en este punto.
+   b. aplicar las mejoras **ADITIVAS** de la carta (Grabado +fichas, Marca +mult, Cristal +fichas, Piedra +fichas). **Los ×mult de mejora de carta (p.ej. Untado ×mult) NO se aplican aquí: se difieren al paso 5.**
    c. aplicar sellos de la carta (Ocre genera moneda, Sangre = retrigger, etc.).
    d. disparar hooks `onCardScored`/`onSuitScored`/`onRankScored` de reliquias afectadas (en orden de posición de reliquia).
 4. Disparar hooks `onHandPlayed` de reliquias (sumas de fichas y de mult), **en orden de posición de reliquia izquierda→derecha**.
-5. Aplicar todos los **×mult** (de reliquias/mejoras marcadas como multiplicativas), **en orden de posición de reliquia izquierda→derecha**.
+5. Aplicar **TODOS los ×mult**, en orden **izquierda→derecha**: primero los ×mult de **mejoras de carta** (Untado, en orden de la zona jugada; un re-disparo aplica su ×mult de nuevo), luego los ×mult de **reliquias** (en orden de posición de reliquia). Ningún ×mult se aplica antes de este paso.
 6. `afterScore` hooks (efectos que leen el total, p.ej. "+1 moneda por cada 100 de puntuación").
 7. `puntuación = floor(FICHAS × MULT)`; acumular.
 
@@ -539,7 +539,16 @@ Fichas: base 25 + [K♥:10+30] + [K♥ retrigger:10+30] + [K♦:10] = 25+40+40+1
 Mult: base 3 +4 (Catalizador) = 7, ×1.5 = 10.5
 Puntuación = floor(115 × 10.5) = floor(1207.5) = 1207
 ```
-Ambos son tests unitarios obligatorios en Bloque 3, junto a casos límite: A como 1 y 11 en escaleras (A-2-3-4-5 y 10-J-Q-K-A), color vs escalera, full vs trío vs doble pareja, Quinteto, tope de retrigger, orden de reliquias afecta ×mult condicionales.
+
+**Tercer test de oro (orden de ×mult — blinda la regla):** Pareja de Damas con una carta **Marcada** (+4 mult, aditivo) y otra **Untada** (×1.5, diferido al paso 5). Demuestra que el ×1.5 se aplica **después** de sumar el +4, no antes:
+```
+Fichas base Pareja Nv.1 = 10 ; +Q(10) +Q(10) = 30
+Mult base 2 + 4 (Marca, paso 3b) = 6
+× 1.5 (Untado, PASO 5) → 9          (si se aplicara antes del +4: 2×1.5=3, +4=7 → mal)
+Puntuación = floor(30 × 9) = 270     (la regla incorrecta daría floor(30 × 7) = 210)
+```
+
+Los tres son tests unitarios obligatorios en Bloque 3, junto a casos límite: A como 1 y 11 en escaleras (A-2-3-4-5 y 10-J-Q-K-A), color vs escalera, full vs trío vs doble pareja, Quinteto, tope de retrigger, orden de reliquias afecta ×mult condicionales.
 
 
 ---
