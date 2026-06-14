@@ -7,7 +7,6 @@
     "umbral-sim": "./src/cli.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "start": "tsx src/cli.ts"

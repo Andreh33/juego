@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { UMBRAL_SCAFFOLD } from './index.js';
+import { UMBRAL_SCAFFOLD } from './index';
 
 describe('andamiaje @umbral/shared', () => {
   it('exporta el marcador de andamiaje', () => {
