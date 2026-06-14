@@ -1,6 +1,6 @@
-import { ENGINE_SCAFFOLD } from '@umbral/engine';
+import { CURRENT_SCHEMA_VERSION } from '@umbral/engine';
 
-// "Hola mundo" del shell (Bloque 0). Importa del engine para probar el cableado del monorepo.
+// "Hola mundo" del shell. Importa del engine para probar el cableado del monorepo.
 // El menu principal con la orla viva (§6.7, §6.9) llega en el Bloque 13.
 export default function Home() {
   return (
@@ -10,9 +10,9 @@ export default function Home() {
         Roguelike deckbuilder de puntuacion. El descenso comienza.
       </p>
       <code className="rounded border border-umbral-pergamino bg-umbral-tinta px-3 py-1 text-xs text-umbral-fosforo">
-        {ENGINE_SCAFFOLD}
+        engine · schema v{CURRENT_SCHEMA_VERSION}
       </code>
-      <span className="text-xs text-umbral-ceniza/60">Bloque 0 — Andamiaje</span>
+      <span className="text-xs text-umbral-ceniza/60">Bloque 2 — Estado + event-sourcing</span>
     </main>
   );
 }
