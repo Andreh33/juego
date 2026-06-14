@@ -7,7 +7,7 @@
 // Bloque 2 = ESQUELETO: transiciona fases y mecaniza el combate (seleccionar/jugar/descartar)
 // SIN scoring (Bloque 3) y SIN mapa real (Bloque 4). Un START_RUN abre directamente un combate
 // provisional para tener una superficie manipulable y determinista.
-import { createRngStreams, type RngStreams, shuffle } from '@umbral/shared';
+import { type Card, createRngStreams, type RngStreams, shuffle } from '@umbral/shared';
 import type { GameAction, StartRunAction } from './actions';
 import { buildStandardDeck } from './deck';
 import {
@@ -24,6 +24,7 @@ import {
 } from './defaults';
 import type { FeelEvent } from './events';
 import { CURRENT_SCHEMA_VERSION } from './migrations';
+import { scoreHand } from './scoring/score';
 import {
   type CombatState,
   type GameState,
@@ -234,8 +235,15 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
       if (c.selected.length < 1 || c.selected.length > MAX_SELECTED) {
         return illegal(state, `selecciona entre 1 y ${MAX_SELECTED} cartas`);
       }
-      // Bloque 2: sin scoring. Se consume la mano y se repone; el calculo de puntos
-      // (deteccion de tipo, pipeline, win/lose) entra en el Bloque 3/4.
+      // Puntuacion (§7.3). Las reliquias se resuelven contra el content registry en el Bloque 5;
+      // aqui el run aun no tiene ninguna, asi que se puntua sin ellas. El win/lose (velas,
+      // objetivo cumplido -> siguiente fase) entra en el Bloque 4.
+      const byId = new Map<string, Card>(state.deck.map((card) => [card.id, card]));
+      const played = c.selected
+        .map((id) => byId.get(id))
+        .filter((card): card is Card => card !== undefined);
+      const result = scoreHand({ played, handLevels: state.handLevels });
+
       const kept = c.hand.filter((id) => !c.selected.includes(id));
       const { hand, drawPile } = refill(kept, c.drawPile, c.handSize);
       const combat: CombatState = {
@@ -244,8 +252,11 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
         drawPile,
         selected: [],
         handsLeft: c.handsLeft - 1,
+        accumulated: c.accumulated + result.score,
       };
-      return commit({ ...state, combat }, action);
+      const gold = state.gold + result.coinsGained;
+      const sanity = Math.max(0, Math.min(state.maxSanity, state.sanity + result.sanityDelta));
+      return commit({ ...state, combat, gold, sanity }, action, result.events);
     }
 
     case 'SCRY_BURY': {

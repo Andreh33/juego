@@ -137,14 +137,14 @@ describe('DISCARD y PLAY_HAND (sin scoring en Bloque 2)', () => {
     expect(res.events[0]).toEqual({ t: 'error', reason: 'no hay cartas seleccionadas' });
   });
 
-  it('PLAY_HAND consume una mano y repone, sin tocar la puntuacion', () => {
+  it('PLAY_HAND consume una mano, repone y acumula puntuacion', () => {
     const s0 = startRun(START);
     const h = combatOf(s0).hand;
     let s = reduce(s0, { type: 'SELECT_CARD', cardId: at(h, 0) }).state;
     s = reduce(s, { type: 'PLAY_HAND' }).state;
     const c = combatOf(s);
     expect(c.handsLeft).toBe(3);
-    expect(c.accumulated).toBe(0); // sin scoring todavia
+    expect(c.accumulated).toBeGreaterThan(0); // ya puntua (Bloque 3)
     expect(c.hand).toHaveLength(8);
     expect(c.selected).toHaveLength(0);
   });
