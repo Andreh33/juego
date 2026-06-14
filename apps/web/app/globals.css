@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/* Tokens base de UMBRAL (§6.2). La paleta completa por Sima se cablea en el Bloque 13. */
+@theme {
+  --color-umbral-vacio: #0a0b0f;
+  --color-umbral-tinta: #14161d;
+  --color-umbral-pergamino: #1b1d26;
+  --color-umbral-hueso: #e8e2d0;
+  --color-umbral-ceniza: #8b8775;
+  --color-umbral-ocre: #c8923a;
+  --color-umbral-ocre-alto: #e6b45a;
+  --color-umbral-sangre: #7a1420;
+  --color-umbral-verdin: #3e6b5a;
+  --color-umbral-fosforo: #a9f0d1;
+  --color-umbral-violeta: #4a3b6b;
+}
+
+html,
+body {
+  background-color: var(--color-umbral-vacio);
+  color: var(--color-umbral-hueso);
+}

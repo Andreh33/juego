@@ -1,0 +1,25 @@
+{
+  "name": "@umbral/game-render",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@umbral/engine": "workspace:*",
+    "@umbral/shared": "workspace:*",
+    "howler": "^2",
+    "pixi.js": "^8"
+  },
+  "devDependencies": {
+    "@types/howler": "^2",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}
