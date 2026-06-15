@@ -5,3 +5,4 @@ export * from './economy';
 export * from './map';
 export * from './objectives';
 export * from './reward';
+export * from './veils';

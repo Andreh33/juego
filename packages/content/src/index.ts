@@ -1,10 +1,12 @@
 // @umbral/content — TODO el contenido como data tipada. El engine lo interpreta (§5.4).
-import type { ContentRegistry } from '@umbral/engine';
+import type { ContentRegistry, UnlockDef } from '@umbral/engine';
 import { BOSSES } from './bosses';
 import { CONSUMABLES } from './consumables';
+import { COSMETICS } from './cosmetics';
 import { ELITES } from './elites';
 import { EVENTS } from './events';
 import { GENERAL_RELICS } from './relics';
+import { UNLOCKS } from './unlocks';
 import { VESSEL_RELICS } from './vessel-relics';
 import { VESSELS } from './vessels';
 import { VOUCHERS } from './vouchers';
@@ -25,12 +27,18 @@ export const REGISTRY: ContentRegistry = {
   events: byId(EVENTS),
 };
 
+/** Todos los desbloqueos (arbol §12.2 + cosmeticos), para el motor de progresion. */
+export const ALL_UNLOCKS: UnlockDef[] = [...UNLOCKS, ...COSMETICS];
+
+export { ACHIEVEMENTS } from './achievements';
 export { BOSSES } from './bosses';
 export { CONSUMABLES } from './consumables';
+export { COSMETICS } from './cosmetics';
 export { ELITES } from './elites';
 export { EVENTS } from './events';
 export * from './modes';
 export { GENERAL_RELICS } from './relics';
+export { UNLOCKS } from './unlocks';
 export { VESSEL_RELICS } from './vessel-relics';
 export { VESSELS } from './vessels';
 export { VOUCHERS } from './vouchers';

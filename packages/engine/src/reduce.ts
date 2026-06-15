@@ -41,14 +41,12 @@ import { generateShop, voucherShopMods } from './content/shop';
 import type { VesselDef } from './content/vessel';
 import { buildStandardDeck, buildVesselDeck } from './deck';
 import {
-  BASE_CANDLES,
   BASE_CONSUMABLE_SLOTS,
   BASE_DISCARDS,
   BASE_GOLD,
   BASE_HAND_SIZE,
   BASE_HANDS,
   BASE_RELIC_SLOTS,
-  BASE_SANITY,
   MAX_SELECTED,
 } from './defaults';
 import type { FeelEvent } from './events';
@@ -57,6 +55,7 @@ import { bonoMultCordura, bossObjectiveFactor } from './run/cordura';
 import { combatGoldReward, interest, SKIP_REWARD_GOLD } from './run/economy';
 import { generateUmbralMap } from './run/map';
 import type { ObjectiveKind } from './run/objectives';
+import { veilMods } from './run/veils';
 import type { Effect, ScoreContext, ScoringRelic } from './scoring/effects';
 import { detectHand } from './scoring/handtype';
 import { scoreHand } from './scoring/score';
@@ -69,6 +68,7 @@ import {
   type ReduceResult,
   type RelicInstance,
   type RewardOption,
+  type RunStats,
   STANDARD_HAND_TYPES,
   type UmbralMap,
 } from './types';
@@ -215,6 +215,11 @@ function makeCombatFor(
   );
   let objective = node.objective ?? 0;
   const vessel = registry.vessels[state.vessel];
+  const vmods = veilMods(state.veil);
+  objective = Math.round(objective * vmods.objectiveFactor);
+  if (node.type === 'jefe' || node.type === 'elite') {
+    objective = Math.round(objective * vmods.bossObjectiveFactor);
+  }
   if (vessel) objective = Math.round(objective * vessel.objectiveFactor);
   if (node.type === 'jefe') objective = Math.round(objective * bossObjectiveFactor(state.sanity));
   if (bossDef?.modifier.objectiveFactor) {
@@ -352,6 +357,8 @@ export function startRun(
   registry: ContentRegistry = EMPTY_REGISTRY,
 ): GameState {
   const { seed, vessel, ruleset, modifiers } = action;
+  const veil = Math.max(0, Math.min(20, Math.floor(action.veil ?? 0)));
+  const vm = veilMods(veil);
   const def = registry.vessels[vessel];
   const rng: RngStreams = createRngStreams(seed);
   let deck = def ? buildVesselDeck(def) : buildStandardDeck();
@@ -366,12 +373,16 @@ export function startRun(
     );
     deck = deck.filter((c) => !removeIds.has(c.id));
   }
-  const candles = modifiers?.startingCandles ?? BASE_CANDLES;
-  const sanity = modifiers?.startingSanity ?? BASE_SANITY;
+  // El Velo fija los valores base; un modificador de modo/desafio explicito tiene prioridad.
+  const candles = modifiers?.startingCandles ?? vm.startingCandles;
+  const sanity = modifiers?.startingSanity ?? vm.startingSanity;
   const baseCombat = {
-    hands: modifiers?.hands ?? def?.baseCombat.hands ?? BASE_HANDS,
+    hands: Math.max(1, (modifiers?.hands ?? def?.baseCombat.hands ?? BASE_HANDS) + vm.handsBonus),
     discards: modifiers?.discards ?? def?.baseCombat.discards ?? BASE_DISCARDS,
-    handSize: modifiers?.handSize ?? def?.baseCombat.handSize ?? BASE_HAND_SIZE,
+    handSize: Math.max(
+      1,
+      (modifiers?.handSize ?? def?.baseCombat.handSize ?? BASE_HAND_SIZE) + vm.handSizeBonus,
+    ),
   };
   const map = generateUmbralMap(1, rng.map); // muta rng.map (fresco)
 
@@ -380,7 +391,7 @@ export function startRun(
     rulesetVersion: ruleset,
     seed,
     vessel,
-    veil: 0,
+    veil,
     mode: action.mode ?? 'carrera',
     ...(action.dailyDate ? { dailyDate: action.dailyDate } : {}),
     ...(action.weeklyId ? { weeklyId: action.weeklyId } : {}),
@@ -404,6 +415,16 @@ export function startRun(
     vouchers: [],
     runScore: 0,
     usedBosses: [],
+    runStats: {
+      bestHandScore: 0,
+      minSanity: sanity,
+      peakGold: modifiers?.startingGold ?? def?.startingGold ?? BASE_GOLD,
+      goldEarned: 0,
+      touchedSanity0: false,
+      maxDiscardsUsed: 0,
+      bossesDefeated: [],
+      eventsResolved: [],
+    },
     map,
     combat: null,
     log: [action],
@@ -523,6 +544,7 @@ export function reduce(
       switch (node.type) {
         case 'tienda': {
           const sm = voucherShopMods(state.vouchers, registry);
+          const vm = veilMods(state.veil);
           const shopRng = cloneRngState(state.rng.shop);
           const shop = generateShop(registry, shopRng, {
             sima: state.sima,
@@ -531,6 +553,9 @@ export function reduce(
             shopDiscount: sm.shopDiscount,
             rerollDiscount: sm.rerollDiscount,
             extraItems: sm.extraItems,
+            costFactor: vm.shopCostFactor,
+            rerollCostBonus: vm.rerollCostBonus,
+            itemBonus: vm.shopItemsBonus,
           });
           return commit(
             { ...state, map, rng: { ...state.rng, shop: shopRng }, phase: 'tienda', shop },
@@ -553,7 +578,7 @@ export function reduce(
           );
         }
         case 'tesoro': {
-          const rew = buildRelicReward({ ...state, map }, registry, 2);
+          const rew = buildRelicReward({ ...state, map }, registry, veilMods(state.veil).draftSize);
           return commit(
             {
               ...state,
@@ -627,19 +652,21 @@ export function reduce(
       if (c.selected.length === 0) return illegal(state, 'no hay cartas seleccionadas');
       const kept = c.hand.filter((id) => !c.selected.includes(id));
       const { hand, drawPile } = refill(kept, c.drawPile, c.handSize);
-      // Frenesi (Bestia, §8.5): cada descarte acumula +1.
+      // Frenesi (Bestia, §8.5): cada descarte acumula +1. Y contamos descartes del combate.
       const dVessel = registry.vessels[state.vessel];
-      const combatRelicState =
-        dVessel?.mechanic === 'frenesi'
-          ? { ...(c.combatRelicState ?? {}), frenesi: (c.combatRelicState?.frenesi ?? 0) + 1 }
-          : c.combatRelicState;
+      const baseCrs = c.combatRelicState ?? {};
+      const combatRelicState: Record<string, number> = {
+        ...baseCrs,
+        disc: (baseCrs.disc ?? 0) + 1,
+        ...(dVessel?.mechanic === 'frenesi' ? { frenesi: (baseCrs.frenesi ?? 0) + 1 } : {}),
+      };
       const combat: CombatState = {
         ...c,
         hand,
         drawPile,
         selected: [],
         discardsLeft: c.discardsLeft - 1,
-        ...(combatRelicState ? { combatRelicState } : {}),
+        combatRelicState,
       };
       const relics = applyScalersOnDiscard(state.relics, registry);
       return commit({ ...state, combat, relics }, action);
@@ -731,10 +758,22 @@ export function reduce(
       );
       const node = state.map ? nodeById(state.map, state.map.currentNodeId) : undefined;
       const kind: ObjectiveKind = (node && objectiveKindOf(node.type)) || 'combate';
+      const statsAfterHand: RunStats | undefined = state.runStats && {
+        ...state.runStats,
+        bestHandScore: Math.max(state.runStats.bestHandScore, result.score),
+        minSanity: Math.min(state.runStats.minSanity, sanity),
+        touchedSanity0: state.runStats.touchedSanity0 || sanity === 0,
+      };
 
       // WIN: objetivo alcanzado.
       if (accumulated >= c.objective) {
-        const reward = combatGoldReward(kind) + interest(gold, 5, vessel?.interestDivisor ?? 5);
+        const vm = veilMods(state.veil);
+        const reward = Math.max(
+          0,
+          combatGoldReward(kind) +
+            interest(gold, 5, vessel?.interestDivisor ?? 5) +
+            vm.goldPerCombatBonus,
+        );
         const endDestroy = combatEndDestroy(state.relics, registry);
         const d =
           endDestroy > 0
@@ -745,7 +784,17 @@ export function reduce(
           registry,
           state.deck.length - d.deck.length,
         );
-        const rew = buildRelicReward({ ...state, rng: d.rng }, registry, 2);
+        const rew = buildRelicReward({ ...state, rng: d.rng }, registry, vm.draftSize);
+        const winStats: RunStats | undefined = statsAfterHand && {
+          ...statsAfterHand,
+          goldEarned: statsAfterHand.goldEarned + reward,
+          peakGold: Math.max(statsAfterHand.peakGold, gold + reward),
+          maxDiscardsUsed: Math.max(statsAfterHand.maxDiscardsUsed, c.combatRelicState?.disc ?? 0),
+          bossesDefeated:
+            (kind === 'jefe' || kind === 'elite') && c.bossId
+              ? [...new Set([...statsAfterHand.bossesDefeated, c.bossId])]
+              : statsAfterHand.bossesDefeated,
+        };
         return commit(
           {
             ...state,
@@ -755,6 +804,7 @@ export function reduce(
             gold: gold + reward,
             sanity,
             runScore: state.runScore + accumulated,
+            ...(winStats ? { runStats: winStats } : {}),
             combat: null,
             phase: 'recompensa',
             pendingReward: { options: rew.options },
@@ -778,15 +828,38 @@ export function reduce(
           accumulated,
           combatRelicState: newCrs,
         };
-        return commit({ ...state, relics, gold, sanity, combat }, action, result.events);
+        return commit(
+          {
+            ...state,
+            relics,
+            gold,
+            sanity,
+            combat,
+            ...(statsAfterHand ? { runStats: statsAfterHand } : {}),
+          },
+          action,
+          result.events,
+        );
       }
+
+      const statsPatch = statsAfterHand ? { runStats: statsAfterHand } : {};
 
       // LOSE: sin manos y sin alcanzar el objetivo -> apaga 1 vela (§9.5).
       const candles = state.candles - 1;
       if (candles <= 0) {
         const lost = { status: 'lost' as const, depth: state.umbral, score: state.runScore };
         return commit(
-          { ...state, relics, gold, sanity, candles: 0, combat: null, phase: 'fin', result: lost },
+          {
+            ...state,
+            relics,
+            gold,
+            sanity,
+            candles: 0,
+            combat: null,
+            phase: 'fin',
+            result: lost,
+            ...statsPatch,
+          },
           action,
           result.events,
         );
@@ -795,13 +868,22 @@ export function reduce(
       if (node?.type === 'jefe') {
         const remade = makeCombatFor({ ...state, relics, gold, sanity, candles }, node, registry);
         return commit(
-          { ...state, relics, gold, sanity, candles, rng: remade.rng, combat: remade.combat },
+          {
+            ...state,
+            relics,
+            gold,
+            sanity,
+            candles,
+            rng: remade.rng,
+            combat: remade.combat,
+            ...statsPatch,
+          },
           action,
           result.events,
         );
       }
       return commit(
-        { ...state, relics, gold, sanity, candles, combat: null, phase: 'mapa' },
+        { ...state, relics, gold, sanity, candles, combat: null, phase: 'mapa', ...statsPatch },
         action,
         result.events,
       );
@@ -902,10 +984,20 @@ export function reduce(
       }
       const ev = registry.events[state.pendingEvent.eventId];
       const opt = ev?.options.find((o) => o.id === action.choiceId);
+      const eventId = state.pendingEvent.eventId;
       const { pendingEvent: _pendingEvent, ...rest } = state;
-      const next: GameState = opt
+      const resolved: GameState = opt
         ? applyEventEffect({ ...rest, phase: 'mapa' }, opt.effect, registry)
         : { ...rest, phase: 'mapa' };
+      const next: GameState = resolved.runStats
+        ? {
+            ...resolved,
+            runStats: {
+              ...resolved.runStats,
+              eventsResolved: [...new Set([...resolved.runStats.eventsResolved, eventId])],
+            },
+          }
+        : resolved;
       return commit(next, action);
     }
 
@@ -1086,6 +1178,7 @@ export function reduce(
       if (state.phase !== 'tienda' || !state.shop) return illegal(state, 'no estas en la tienda');
       if (state.gold < state.shop.rerollCost) return illegal(state, 'oro insuficiente para reroll');
       const sm = voucherShopMods(state.vouchers, registry);
+      const vm = veilMods(state.veil);
       const shopRng = cloneRngState(state.rng.shop);
       const fresh = generateShop(registry, shopRng, {
         sima: state.sima,
@@ -1094,6 +1187,9 @@ export function reduce(
         shopDiscount: sm.shopDiscount,
         rerollDiscount: sm.rerollDiscount,
         extraItems: sm.extraItems,
+        costFactor: vm.shopCostFactor,
+        rerollCostBonus: vm.rerollCostBonus,
+        itemBonus: vm.shopItemsBonus,
       });
       const shop = {
         ...fresh,

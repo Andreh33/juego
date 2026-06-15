@@ -11,6 +11,7 @@ export * from './deck';
 export * from './defaults';
 export * from './events';
 export * from './migrations';
+export * from './progression';
 export * from './reduce';
 export * from './run';
 export * from './scoring';

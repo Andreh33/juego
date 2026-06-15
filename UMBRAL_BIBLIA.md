@@ -1543,6 +1543,15 @@ Todo lo demás está decidido aquí. Ejecuta **bloque a bloque, con gate**, empe
 
 > Si una reliquia futura necesita un verbo que el DSL no expresa, se **extiende el DSL una vez** (un `Condition`/`Effect`/`CountRef` nuevo bien definido), nunca un `if`-por-id en el engine.
 
+## 22.6 El DSL de progresión (implementado en Bloque 17)
+
+> También ausente del borrador; lo define la implementación (Bloque 17). Velos, desbloqueos (§12.2) y logros (§12.3) son **data declarativa** evaluada por `packages/engine/src/progression`; cero `if`-por-id.
+
+- **Velos (`VeilMods`)**: el Velo 0..20 se traduce a un agregado acumulativo de modificadores (factor de objetivo, coste de tienda, velas/Cordura iniciales, hand size, draft, oro por combate, Maldita garantizada, fase extra de jefe…). El engine lo consulta en `startRun`, `makeCombatFor` y la generación de tienda/recompensa. Lo no mecanizable aún (alucinaciones, descanso restringido, élites frecuentes, Sello del Abismo) viaja como `flags` para los bloques de feel.
+- **Condición (`ProgCond`)**: `{key, gte|lte|eq}` o `{all:[…]}` / `{any:[…]}`, evaluada contra un **stat bag** plano (perfil *lifetime* + resumen de la run aplanados, p.ej. `lifetime.runsWon`, `run.bestHandScore`, `wonWith.<recipiente>`, `veilCleared.<recipiente>`).
+- **`UnlockDef`** (`recipiente`/`reliquia`/`mazo`/`mano`/`jefe`/`cosmetico`) y **`AchievementDef`** (categoría + `secret?`) son catálogos en `packages/content` (`UNLOCKS`, `COSMETICS`, `ACHIEVEMENTS`).
+- **Flujo (`processRunEnd`)**: al terminar la run → `summarizeRun` (estado final + `RunStats`) → `applyRunToProfile` (acumulación no destructiva, INV-6) → `grantUnlocks`/`grantAchievements` (sin duplicar). Lo consume el cliente/servidor (§14/§15).
+
 ---
 
 # 23. DESPLIEGUE EN VERCEL + TURSO (antes Supabase)
