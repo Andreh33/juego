@@ -140,6 +140,8 @@ export interface GameState {
   gold: number;
   /** Puntuacion total acumulada del run (suma de combates ganados; para el marcador, §15). */
   runScore: number;
+  /** Jefes ya enfrentados en este run (para no repetir, §11.7). */
+  usedBosses: string[];
   /** Recursos base por combate (defaults + modificadores; los vales/Recipiente los suben). */
   baseCombat: { hands: number; discards: number; handSize: number };
   deck: Card[];

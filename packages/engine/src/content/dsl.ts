@@ -3,6 +3,7 @@
 import type { Enhancement, Rarity, Seal, VesselId } from '@umbral/shared';
 import type { Condition, Effect } from '../scoring/effects';
 import type { HandType } from '../types';
+import type { BossDef } from './boss';
 import type { VesselDef } from './vessel';
 
 /** Disparador de un escalador (reliquia que crece durante el run). */
@@ -110,6 +111,7 @@ export interface ContentRegistry {
   consumables: Record<string, ConsumableDef>;
   vessels: Record<string, VesselDef>;
   vouchers: Record<string, VoucherDef>;
+  bosses: Record<string, BossDef>;
 }
 
 export const EMPTY_REGISTRY: ContentRegistry = {
@@ -117,4 +119,5 @@ export const EMPTY_REGISTRY: ContentRegistry = {
   consumables: {},
   vessels: {},
   vouchers: {},
+  bosses: {},
 };

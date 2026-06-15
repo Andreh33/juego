@@ -29,6 +29,9 @@ const CTX: ScoreContext = {
   noRetriggerCap: false,
   extraRetrigger: 0,
   wildSuit: false,
+  silencedSuits: [],
+  figuresHalf: false,
+  relicXMultPenalty: 0,
 };
 
 let counter = 0;
