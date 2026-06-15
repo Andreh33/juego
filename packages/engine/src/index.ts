@@ -2,6 +2,7 @@
 export * from './actions';
 export * from './content/boss';
 export * from './content/dsl';
+export * from './content/event';
 export * from './content/interpret';
 export * from './content/pool';
 export * from './content/shop';
