@@ -1,6 +1,6 @@
 # BIBLIA DE DISEÑO + PROMPT MAESTRO — UMBRAL (EDICIÓN COMPLETA v2)
 
-**Codename:** `UMBRAL` · **Género:** roguelike deckbuilder de puntuación (póker) con descenso por mazmorra ramificada · **Plataforma:** web (escritorio primero) · **Deploy:** Vercel + Supabase · **Diseño:** Andreh (Latech) · **Ejecutor:** Claude Code · **Objetivo declarado:** un juego de *cientos de horas*, alta rejugabilidad, diversidad de builds y factor suerte deliberado. No un juego que se pasa en dos horas.
+**Codename:** `UMBRAL` · **Género:** roguelike deckbuilder de puntuación (póker) con descenso por mazmorra ramificada · **Plataforma:** web (escritorio primero) · **Deploy:** Vercel + Turso · **Diseño:** Andreh (Latech) · **Ejecutor:** Claude Code · **Objetivo declarado:** un juego de *cientos de horas*, alta rejugabilidad, diversidad de builds y factor suerte deliberado. No un juego que se pasa en dos horas.
 
 > Este documento es a la vez **biblia de diseño** (el "qué" y el "por qué") y **prompt maestro de ejecución** (el "cómo", por bloques con gate). Es la fuente única de verdad. Si algo no está aquí, Claude Code PARA y pregunta; no inventa.
 
@@ -178,11 +178,11 @@ Monorepo (pnpm workspaces + Turborepo)
 - **Validación:** Zod en todos los bordes (red, saves, env).
 - **Audio:** Howler.js (sprites SFX + música por capas con crossfade).
 - **Tween shell:** GSAP (UI React). **Tween juego:** dentro del loop de Pixi (tween.js o tweens propios; decidir Bloque 6).
-- **DB/Auth:** Supabase (`@supabase/ssr`).
-- **Persistencia social:** Supabase (auth + guardado en nube + marcador de amigos). Sin servidor de validación (juego entre amigos, §16).
+- **DB:** **Turso (libsql/SQLite)** vía `@libsql/client` (decisión del arquitecto; sustituye a Supabase). **Sin auth ni RLS**: identidad por **handle**, marcador **por confianza** (§16). Migraciones SQL en `db/migrations`.
+- **Persistencia social:** Turso (guardado en nube + marcador de amigos) a través de Route Handlers de Next. Sin servidor de validación (juego entre amigos, §16).
 - **Tests:** Vitest (engine, content, shared). Playwright (smoke E2E shell). El paquete `sim` para balanceo estadístico.
-- **Telemetría:** eventos anónimos de balanceo a Supabase (opt-out respetado).
-- **Deploy:** Vercel (apps/web), Supabase gestionado.
+- **Telemetría:** eventos anónimos de balanceo a Turso (opt-out respetado).
+- **Deploy:** Vercel (apps/web), Turso gestionado.
 - **Lint/format:** Biome.
 - **Runtime:** Node 20 LTS · pnpm.
 
@@ -1108,9 +1108,11 @@ La "biblia del juice":
 
 ---
 
-# 15. DATOS / SUPABASE
+# 15. DATOS / TURSO (antes Supabase)
 
-## 15.1 Esquema (migraciones aditivas, RLS estricto)
+> **Cambio de stack (arquitecto):** la persistencia es **Turso (libsql/SQLite)**, no Supabase. Turso no tiene auth ni RLS, lo cual encaja con §16 (**sin anti-trampas, por confianza**): la identidad es por **handle** + `playerId` (uuid de cliente), no hay login con contraseña. El esquema real (SQLite) vive en **`db/migrations/0001_init.sql`** y se aplica con `pnpm db:migrate`. El acceso es vía **Route Handlers de Next** (`apps/web/app/api/scores`, `/api/save`) con validación Zod del formato (`apps/web/lib/`). El esquema Postgres/RLS de abajo es la **referencia conceptual original**; la implementación lo traduce a SQLite sin RLS.
+
+## 15.1 Esquema (referencia conceptual; la implementación está en `db/migrations`)
 ```sql
 profiles ( id uuid pk refs auth.users, handle text unique not null, created_at timestamptz )
 player_meta ( user_id uuid pk refs auth.users, schema_version int, blob jsonb )  -- unlocks, cosméticos, ajustes, guardado en nube
@@ -1543,9 +1545,11 @@ Todo lo demás está decidido aquí. Ejecuta **bloque a bloque, con gate**, empe
 
 ---
 
-# 23. DESPLIEGUE EN VERCEL + SUPABASE
+# 23. DESPLIEGUE EN VERCEL + TURSO (antes Supabase)
 
 > El juego se sube a Vercel. Esta sección fija la topología exacta para que no haya sorpresas (especialmente cómo se sirven los atlas pesados). Como no hay anti-trampas (§16), la topología es simple.
+>
+> **Cambio de stack (arquitecto):** la base de datos es **Turso (libsql)**, no Supabase. Vars de entorno (solo servidor, §23.3): `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `RULESET_VERSION` (ver `.env.example`). Migraciones con `pnpm db:migrate`. Los Route Handlers (`/api/scores`, `/api/save`) corren en runtime Node. Sin Auth/RLS (identidad por handle, confianza §16).
 
 ## 23.1 Topología
 ```
