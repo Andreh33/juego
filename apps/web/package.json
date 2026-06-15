@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
+    "@umbral/content": "workspace:*",
     "@umbral/engine": "workspace:*",
     "@umbral/shared": "workspace:*",
     "next": "^16",
