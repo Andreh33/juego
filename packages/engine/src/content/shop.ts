@@ -1,5 +1,5 @@
 // Tienda (§11.10): inventario generado por seed (stream de tienda), ponderado por Sima.
-import { nextInt, type RngState } from '@umbral/shared';
+import { nextInt, type RngState, type VesselId } from '@umbral/shared';
 import type { ShopItem, ShopState } from '../types';
 import type { ConsumableDef, ContentRegistry, VoucherDef } from './dsl';
 import { pickRelicRewards } from './pool';
@@ -45,6 +45,8 @@ export interface ShopGenOpts {
   rerollCostBonus?: number;
   /** Velo: sumando al numero de items de reliquia (-1 a Velo 17). */
   itemBonus?: number;
+  /** Recipiente actual: sesga el pool a sus reliquias (§8). */
+  vessel?: VesselId;
 }
 
 /** Genera el inventario de la tienda. Muta el RngState (stream de tienda). */
@@ -59,7 +61,14 @@ export function generateShop(
   const costFactor = opts.costFactor ?? 1;
 
   const relicCount = Math.max(1, 2 + opts.extraItems + (opts.itemBonus ?? 0));
-  for (const pick of pickRelicRewards(registry, rng, opts.sima, relicCount, opts.ownedRelicIds)) {
+  for (const pick of pickRelicRewards(
+    registry,
+    rng,
+    opts.sima,
+    relicCount,
+    opts.ownedRelicIds,
+    opts.vessel,
+  )) {
     const def = registry.relics[pick.id];
     if (def) {
       items.push({

@@ -305,7 +305,7 @@ function buildRelicReward(
 ): { rng: RngStreams; options: RewardOption[] } {
   const reward = cloneRngState(state.rng.reward);
   const owned = new Set(state.relics.map((r) => r.defId));
-  const picks = pickRelicRewards(registry, reward, state.sima, count, owned);
+  const picks = pickRelicRewards(registry, reward, state.sima, count, owned, state.vessel);
   const options: RewardOption[] = [
     ...picks.map((p) => ({ id: p.id, kind: 'relic' as const })),
     { id: 'reward.skip', kind: 'skip' as const },
@@ -556,6 +556,7 @@ export function reduce(
             costFactor: vm.shopCostFactor,
             rerollCostBonus: vm.rerollCostBonus,
             itemBonus: vm.shopItemsBonus,
+            vessel: state.vessel,
           });
           return commit(
             { ...state, map, rng: { ...state.rng, shop: shopRng }, phase: 'tienda', shop },
@@ -1190,6 +1191,7 @@ export function reduce(
         costFactor: vm.shopCostFactor,
         rerollCostBonus: vm.rerollCostBonus,
         itemBonus: vm.shopItemsBonus,
+        vessel: state.vessel,
       });
       const shop = {
         ...fresh,
