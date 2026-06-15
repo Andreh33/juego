@@ -22,6 +22,8 @@ export type GameAction =
       seed: string;
       vessel: VesselId;
       ruleset: number;
+      /** Velo de dificultad 0..20 (§12.1). Default 0. */
+      veil?: number;
       modifiers?: RunModifiers;
       mode?: RunMode;
       dailyDate?: string;

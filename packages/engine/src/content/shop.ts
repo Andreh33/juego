@@ -10,8 +10,8 @@ function consumableCost(c: ConsumableDef): number {
   return 4; // augurio
 }
 
-function withDiscount(base: number, discount: number): number {
-  return Math.max(1, Math.round(base * (1 - discount)));
+function withDiscount(base: number, discount: number, costFactor = 1): number {
+  return Math.max(1, Math.round(base * (1 - discount) * costFactor));
 }
 
 /** Descuentos agregados de los vales activos (Mercader, Reroll). */
@@ -39,6 +39,12 @@ export interface ShopGenOpts {
   shopDiscount: number;
   rerollDiscount: number;
   extraItems: number;
+  /** Velo: factor multiplicativo sobre el coste (>1 encarece). */
+  costFactor?: number;
+  /** Velo: sumando al coste de reroll. */
+  rerollCostBonus?: number;
+  /** Velo: sumando al numero de items de reliquia (-1 a Velo 17). */
+  itemBonus?: number;
 }
 
 /** Genera el inventario de la tienda. Muta el RngState (stream de tienda). */
@@ -50,15 +56,16 @@ export function generateShop(
   const items: ShopItem[] = [];
   let counter = 0;
   const mkId = () => `shop_${counter++}`;
+  const costFactor = opts.costFactor ?? 1;
 
-  const relicCount = 2 + opts.extraItems;
+  const relicCount = Math.max(1, 2 + opts.extraItems + (opts.itemBonus ?? 0));
   for (const pick of pickRelicRewards(registry, rng, opts.sima, relicCount, opts.ownedRelicIds)) {
     const def = registry.relics[pick.id];
     if (def) {
       items.push({
         id: mkId(),
         kind: 'relic',
-        cost: withDiscount(def.cost, opts.shopDiscount),
+        cost: withDiscount(def.cost, opts.shopDiscount, costFactor),
         payloadId: pick.id,
       });
     }
@@ -71,7 +78,7 @@ export function generateShop(
       items.push({
         id: mkId(),
         kind: 'arcano',
-        cost: withDiscount(consumableCost(c), opts.shopDiscount),
+        cost: withDiscount(consumableCost(c), opts.shopDiscount, costFactor),
         payloadId: c.id,
       });
     }
@@ -86,11 +93,15 @@ export function generateShop(
       items.push({
         id: mkId(),
         kind: 'vale',
-        cost: withDiscount(v.cost, opts.shopDiscount),
+        cost: withDiscount(v.cost, opts.shopDiscount, costFactor),
         payloadId: v.id,
       });
     }
   }
 
-  return { items, rerollCost: Math.max(1, 5 - opts.rerollDiscount), rerollsThisVisit: 0 };
+  return {
+    items,
+    rerollCost: Math.max(1, 5 - opts.rerollDiscount + (opts.rerollCostBonus ?? 0)),
+    rerollsThisVisit: 0,
+  };
 }

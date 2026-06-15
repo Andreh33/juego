@@ -121,6 +121,27 @@ export interface RunResult {
   score: number;
 }
 
+// ---- Estadisticas de run (para logros/desbloqueos, §12.2/§12.3) ----
+/** Acumulador de hechos relevantes de la run, actualizado por reduce. Serializable. */
+export interface RunStats {
+  /** Mayor puntuacion de una sola mano. */
+  bestHandScore: number;
+  /** Cordura minima tocada. */
+  minSanity: number;
+  /** Oro maximo poseido a la vez. */
+  peakGold: number;
+  /** Oro total ganado en la run (acumulado). */
+  goldEarned: number;
+  /** Tocaste Cordura 0 en algun momento. */
+  touchedSanity0: boolean;
+  /** Mayor numero de descartes usados en un solo combate. */
+  maxDiscardsUsed: number;
+  /** Ids de jefes/elites vencidos en esta run. */
+  bossesDefeated: string[];
+  /** Ids de eventos resueltos en esta run. */
+  eventsResolved: string[];
+}
+
 // ---- GameState (raiz) ----
 export interface GameState {
   schemaVersion: number;
@@ -146,6 +167,8 @@ export interface GameState {
   runScore: number;
   /** Jefes ya enfrentados en este run (para no repetir, §11.7). */
   usedBosses: string[];
+  /** Estadisticas acumuladas de la run (logros/desbloqueos, §12.2/§12.3). */
+  runStats?: RunStats;
   /** Recursos base por combate (defaults + modificadores; los vales/Recipiente los suben). */
   baseCombat: { hands: number; discards: number; handSize: number };
   deck: Card[];
