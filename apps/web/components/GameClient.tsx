@@ -1,6 +1,6 @@
 'use client';
 import { useGame } from '../lib/store';
-import { CombatView } from './CombatView';
+import { CombatViewPixi } from './CombatViewPixi';
 import { EndView } from './EndView';
 import { EventView } from './EventView';
 import { Hud } from './Hud';
@@ -25,7 +25,7 @@ export function GameClient() {
         </div>
       ) : null}
       {state.phase === 'mapa' && <MapView state={state} />}
-      {(state.phase === 'combate' || state.phase === 'jefe') && <CombatView state={state} />}
+      {(state.phase === 'combate' || state.phase === 'jefe') && <CombatViewPixi state={state} />}
       {state.phase === 'tienda' && <ShopView state={state} />}
       {(state.phase === 'evento' || state.phase === 'santuario') && <EventView state={state} />}
       {state.phase === 'descanso' && <RestView state={state} />}
