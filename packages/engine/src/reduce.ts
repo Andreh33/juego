@@ -19,6 +19,7 @@ import {
 } from '@umbral/shared';
 import type { GameAction, StartRunAction } from './actions';
 import { type ContentRegistry, EMPTY_REGISTRY } from './content/dsl';
+import type { EventOptionEffect } from './content/event';
 import {
   acquireEffect,
   applyScalersOnBossDefeated,
@@ -215,13 +216,11 @@ function makeCombatFor(
   let objective = node.objective ?? 0;
   const vessel = registry.vessels[state.vessel];
   if (vessel) objective = Math.round(objective * vessel.objectiveFactor);
-  if (node.type === 'jefe') {
-    objective = Math.round(objective * bossObjectiveFactor(state.sanity));
-    if (bossDef?.modifier.objectiveFactor) {
-      objective = Math.round(objective * bossDef.modifier.objectiveFactor);
-    }
+  if (node.type === 'jefe') objective = Math.round(objective * bossObjectiveFactor(state.sanity));
+  if (bossDef?.modifier.objectiveFactor) {
+    objective = Math.round(objective * bossDef.modifier.objectiveFactor);
   }
-  const bossId = node.type === 'jefe' ? (bossDefId ?? `boss.${node.id}`) : `elite.${node.id}`;
+  const bossId = bossDefId ?? (node.type === 'jefe' ? `boss.${node.id}` : `elite.${node.id}`);
   const combat: CombatState = {
     objective,
     accumulated: 0,
@@ -240,6 +239,57 @@ function makeCombatFor(
     ...(node.type === 'jefe' || node.type === 'elite' ? { bossId } : {}),
   };
   return { rng: dealt.rng, combat };
+}
+
+/** Aplica el efecto de una opcion de evento/santuario (§11.9, §10.5). */
+function applyEventEffect(
+  state: GameState,
+  effect: EventOptionEffect,
+  registry: ContentRegistry,
+): GameState {
+  let next = { ...state };
+  if (effect.goldDelta) next = { ...next, gold: Math.max(0, next.gold + effect.goldDelta) };
+  if (effect.maxSanityDelta) {
+    next = { ...next, maxSanity: Math.max(1, next.maxSanity + effect.maxSanityDelta) };
+  }
+  if (effect.sanityDelta) {
+    next = { ...next, sanity: clamp(next.sanity + effect.sanityDelta, 0, next.maxSanity) };
+  }
+  if (effect.maxCandleDelta) {
+    const mc = Math.max(1, next.maxCandles + effect.maxCandleDelta);
+    next = { ...next, maxCandles: mc, candles: Math.min(next.candles, mc) };
+  }
+  if (effect.candleDelta) {
+    next = { ...next, candles: clamp(next.candles + effect.candleDelta, 0, next.maxCandles) };
+  }
+  if (effect.destroyRandomDeck) {
+    const d = destroyRandomFromDeck(next.rng, next.deck, effect.destroyRandomDeck);
+    next = { ...next, rng: d.rng, deck: d.deck };
+  }
+  if (effect.gainRelicRarity && next.relics.length < next.relicSlots) {
+    const owned = new Set(next.relics.map((r) => r.defId));
+    const cand = Object.values(registry.relics).filter(
+      (r) => r.rarity === effect.gainRelicRarity && !r.vessel && !owned.has(r.id),
+    );
+    if (cand.length > 0) {
+      const reward = cloneRngState(next.rng.reward);
+      const pick = cand[nextInt(reward, 0, cand.length - 1)];
+      next = { ...next, rng: { ...next.rng, reward } };
+      if (pick) next = { ...next, relics: [...next.relics, { defId: pick.id }] };
+    }
+  }
+  if (effect.gainConsumableKind && next.consumables.length < next.consumableSlots) {
+    const cand = Object.values(registry.consumables).filter(
+      (c) => c.kind === effect.gainConsumableKind,
+    );
+    if (cand.length > 0) {
+      const reward = cloneRngState(next.rng.reward);
+      const pick = cand[nextInt(reward, 0, cand.length - 1)];
+      next = { ...next, rng: { ...next.rng, reward } };
+      if (pick) next = { ...next, consumables: [...next.consumables, { defId: pick.id }] };
+    }
+  }
+  return next;
 }
 
 /** Construye un draft de recompensa con reliquias reales del pool (§9.7). Clona rng.reward. */
@@ -409,12 +459,12 @@ export function reduce(
 
       if (objectiveKindOf(node.type)) {
         let base: GameState = { ...state, map };
-        // Seleccion de jefe: pool por Sima, sin repetir en el run (§11.7).
+        // Seleccion de jefe (pool por Sima, sin repetir, §11.7) o de modificador de elite (§11.8).
         let bossDefId: string | undefined;
         if (node.type === 'jefe') {
           const poolSima = Math.min(3, state.sima);
           const all = Object.values(registry.bosses).filter(
-            (b) => b.sima === poolSima && !b.secret,
+            (b) => b.sima === poolSima && !b.secret && !b.elite,
           );
           const fresh = all.filter((b) => !state.usedBosses.includes(b.id));
           const choices = fresh.length > 0 ? fresh : all;
@@ -426,6 +476,14 @@ export function reduce(
               bossDefId = pick.id;
               base = { ...base, usedBosses: [...state.usedBosses, pick.id] };
             }
+          }
+        } else if (node.type === 'elite') {
+          const elites = Object.values(registry.bosses).filter((b) => b.elite);
+          if (elites.length > 0) {
+            const bossRng = cloneRngState(state.rng.boss);
+            const pick = elites[nextInt(bossRng, 0, elites.length - 1)];
+            base = { ...base, rng: { ...base.rng, boss: bossRng } };
+            if (pick) bossDefId = pick.id;
           }
         }
         const cs = combatStartEffects(state.relics, registry);
@@ -464,11 +522,21 @@ export function reduce(
             action,
           );
         }
-        case 'evento':
+        case 'evento': {
+          const eventRng = cloneRngState(state.rng.event);
+          const pool = Object.values(registry.events).filter((e) => !e.santuario);
+          const ev = pool.length > 0 ? pool[nextInt(eventRng, 0, pool.length - 1)] : undefined;
           return commit(
-            { ...state, map, phase: 'evento', pendingEvent: { eventId: 'evento.placeholder' } },
+            {
+              ...state,
+              map,
+              rng: { ...state.rng, event: eventRng },
+              phase: 'evento',
+              pendingEvent: { eventId: ev?.id ?? 'evento.placeholder' },
+            },
             action,
           );
+        }
         case 'tesoro': {
           const rew = buildRelicReward({ ...state, map }, registry, 2);
           return commit(
@@ -484,8 +552,21 @@ export function reduce(
         }
         case 'descanso':
           return commit({ ...state, map, phase: 'descanso' }, action);
-        case 'santuario':
-          return commit({ ...state, map, phase: 'santuario' }, action);
+        case 'santuario': {
+          const eventRng = cloneRngState(state.rng.event);
+          const pool = Object.values(registry.events).filter((e) => e.santuario);
+          const ev = pool.length > 0 ? pool[nextInt(eventRng, 0, pool.length - 1)] : undefined;
+          return commit(
+            {
+              ...state,
+              map,
+              rng: { ...state.rng, event: eventRng },
+              phase: 'santuario',
+              pendingEvent: { eventId: ev?.id ?? 'santuario.placeholder' },
+            },
+            action,
+          );
+        }
         default:
           return illegal(state, 'tipo de nodo desconocido');
       }
@@ -801,22 +882,28 @@ export function reduce(
     }
 
     case 'RESOLVE_EVENT': {
-      if (state.phase !== 'evento' || !state.pendingEvent) return illegal(state, 'no hay evento');
-      // Contenido real de eventos en el Bloque 12; por ahora resolver = volver al mapa.
+      if ((state.phase !== 'evento' && state.phase !== 'santuario') || !state.pendingEvent) {
+        return illegal(state, 'no hay evento');
+      }
+      const ev = registry.events[state.pendingEvent.eventId];
+      const opt = ev?.options.find((o) => o.id === action.choiceId);
       const { pendingEvent: _pendingEvent, ...rest } = state;
-      return commit({ ...rest, phase: 'mapa' }, action);
+      const next: GameState = opt
+        ? applyEventEffect({ ...rest, phase: 'mapa' }, opt.effect, registry)
+        : { ...rest, phase: 'mapa' };
+      return commit(next, action);
     }
 
     case 'NEXT': {
       switch (state.phase) {
         case 'descanso':
-        case 'santuario':
           return commit({ ...state, phase: 'mapa' }, action);
         case 'tienda': {
           const { shop: _shop, ...rest } = state;
           return commit({ ...rest, phase: 'mapa' }, action);
         }
-        case 'evento': {
+        case 'evento':
+        case 'santuario': {
           const { pendingEvent: _pendingEvent, ...rest } = state;
           return commit({ ...rest, phase: 'mapa' }, action);
         }

@@ -2,6 +2,8 @@
 import type { ContentRegistry } from '@umbral/engine';
 import { BOSSES } from './bosses';
 import { CONSUMABLES } from './consumables';
+import { ELITES } from './elites';
+import { EVENTS } from './events';
 import { GENERAL_RELICS } from './relics';
 import { VESSEL_RELICS } from './vessel-relics';
 import { VESSELS } from './vessels';
@@ -19,11 +21,14 @@ export const REGISTRY: ContentRegistry = {
   consumables: byId(CONSUMABLES),
   vessels: byId(VESSELS),
   vouchers: byId(VOUCHERS),
-  bosses: byId(BOSSES),
+  bosses: byId([...BOSSES, ...ELITES]),
+  events: byId(EVENTS),
 };
 
 export { BOSSES } from './bosses';
 export { CONSUMABLES } from './consumables';
+export { ELITES } from './elites';
+export { EVENTS } from './events';
 export { GENERAL_RELICS } from './relics';
 export { VESSEL_RELICS } from './vessel-relics';
 export { VESSELS } from './vessels';

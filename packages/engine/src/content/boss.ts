@@ -35,4 +35,6 @@ export interface BossDef {
   orla: string;
   modifier: BossModifier;
   secret?: boolean;
+  /** true = modificador de Elite (§11.8), no de jefe; excluido del pool de jefes. */
+  elite?: boolean;
 }
