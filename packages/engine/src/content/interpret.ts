@@ -81,9 +81,14 @@ export function acquireEffect(
 ): {
   maxCandlesDelta: number;
   sanityDelta: number;
+  goldDelta: number;
 } {
   const a = registry.relics[defId]?.onAcquire;
-  return { maxCandlesDelta: a?.maxCandlesDelta ?? 0, sanityDelta: a?.sanityDelta ?? 0 };
+  return {
+    maxCandlesDelta: a?.maxCandlesDelta ?? 0,
+    sanityDelta: a?.sanityDelta ?? 0,
+    goldDelta: a?.goldDelta ?? 0,
+  };
 }
 
 /** Efectos agregados al iniciar combate. */

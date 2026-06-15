@@ -3,6 +3,7 @@
 import type { Enhancement, Rarity, Seal, VesselId } from '@umbral/shared';
 import type { Condition, Effect } from '../scoring/effects';
 import type { HandType } from '../types';
+import type { VesselDef } from './vessel';
 
 /** Disparador de un escalador (reliquia que crece durante el run). */
 export type ScalerTrigger =
@@ -36,8 +37,8 @@ export interface RelicDef {
   extraRetriggerPerSource?: number;
   wildSuit?: boolean;
   // ---- Hooks de run (§5.4) ----
-  /** Al obtener la reliquia (p.ej. -1 vela maxima). */
-  onAcquire?: { maxCandlesDelta?: number; sanityDelta?: number };
+  /** Al obtener la reliquia (p.ej. -1 vela maxima, +oro). */
+  onAcquire?: { maxCandlesDelta?: number; sanityDelta?: number; goldDelta?: number };
   /** Al iniciar cada combate (Corona de Espinas, Sacrificio). */
   onCombatStart?: { sanityDelta?: number; destroyRandomDeck?: number };
   /** Al ganar un combate (Hambre). */
@@ -66,6 +67,7 @@ export interface ConsumableDef {
 export interface ContentRegistry {
   relics: Record<string, RelicDef>;
   consumables: Record<string, ConsumableDef>;
+  vessels: Record<string, VesselDef>;
 }
 
-export const EMPTY_REGISTRY: ContentRegistry = { relics: {}, consumables: {} };
+export const EMPTY_REGISTRY: ContentRegistry = { relics: {}, consumables: {}, vessels: {} };

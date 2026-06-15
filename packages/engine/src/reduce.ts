@@ -33,7 +33,8 @@ import {
   umbralEndGoldFactor,
 } from './content/interpret';
 import { pickRelicRewards } from './content/pool';
-import { buildStandardDeck } from './deck';
+import type { VesselDef } from './content/vessel';
+import { buildStandardDeck, buildVesselDeck } from './deck';
 import {
   BASE_CANDLES,
   BASE_CONSUMABLE_SLOTS,
@@ -51,12 +52,14 @@ import { bonoMultCordura, bossObjectiveFactor } from './run/cordura';
 import { combatGoldReward, interest, SKIP_REWARD_GOLD } from './run/economy';
 import { generateUmbralMap } from './run/map';
 import type { ObjectiveKind } from './run/objectives';
-import type { ScoreContext } from './scoring/effects';
+import type { Effect, ScoreContext, ScoringRelic } from './scoring/effects';
+import { detectHand } from './scoring/handtype';
 import { scoreHand } from './scoring/score';
 import {
   type CombatState,
   type GameState,
   type HandLevel,
+  type HandType,
   type MapNode,
   type ReduceResult,
   type RelicInstance,
@@ -108,6 +111,31 @@ function initialHandLevels(): Record<string, HandLevel> {
   const levels: Record<string, HandLevel> = {};
   for (const t of STANDARD_HAND_TYPES) levels[t] = { level: 1 };
   return levels;
+}
+
+const HAND_CODES: HandType[] = [
+  ...STANDARD_HAND_TYPES,
+  'quinteto',
+  'quinteto_color',
+  'hilera_negra',
+];
+
+/** Codigo numerico de un tipo de mano (para guardar el "ultimo tipo" del Eco en combatRelicState). */
+function handCode(type: HandType): number {
+  return HAND_CODES.indexOf(type) + 1;
+}
+
+/** Catalogo (Coleccionista, §8.4): +fichas por cada palo con >= umbral cartas mejoradas. */
+function catalogoBonus(vessel: VesselDef, deck: GameState['deck']): number {
+  const threshold = vessel.mechanicParams?.threshold ?? 5;
+  const per = vessel.mechanicParams?.fichasPerSuit ?? 20;
+  const counts = new Map<string, number>();
+  for (const c of deck) {
+    if (c.enhancement !== null && c.suit) counts.set(c.suit, (counts.get(c.suit) ?? 0) + 1);
+  }
+  let suits = 0;
+  for (const v of counts.values()) if (v >= threshold) suits++;
+  return suits * per;
 }
 
 function simaForUmbral(umbral: number): 1 | 2 | 3 | 4 {
@@ -179,6 +207,8 @@ function makeCombatFor(
     handSize,
   );
   let objective = node.objective ?? 0;
+  const vessel = registry.vessels[state.vessel];
+  if (vessel) objective = Math.round(objective * vessel.objectiveFactor);
   if (node.type === 'jefe') objective = Math.round(objective * bossObjectiveFactor(state.sanity));
   const combat: CombatState = {
     objective,
@@ -252,16 +282,20 @@ function afterReward(
 
 // ---- Constructor de run (START_RUN) ----
 
-export function startRun(action: StartRunAction): GameState {
+export function startRun(
+  action: StartRunAction,
+  registry: ContentRegistry = EMPTY_REGISTRY,
+): GameState {
   const { seed, vessel, ruleset, modifiers } = action;
+  const def = registry.vessels[vessel];
   const rng: RngStreams = createRngStreams(seed);
-  const deck = buildStandardDeck();
+  const deck = def ? buildVesselDeck(def) : buildStandardDeck();
   const candles = modifiers?.startingCandles ?? BASE_CANDLES;
   const sanity = modifiers?.startingSanity ?? BASE_SANITY;
   const baseCombat = {
-    hands: modifiers?.hands ?? BASE_HANDS,
-    discards: modifiers?.discards ?? BASE_DISCARDS,
-    handSize: modifiers?.handSize ?? BASE_HAND_SIZE,
+    hands: modifiers?.hands ?? def?.baseCombat.hands ?? BASE_HANDS,
+    discards: modifiers?.discards ?? def?.baseCombat.discards ?? BASE_DISCARDS,
+    handSize: modifiers?.handSize ?? def?.baseCombat.handSize ?? BASE_HAND_SIZE,
   };
   const map = generateUmbralMap(1, rng.map); // muta rng.map (fresco)
 
@@ -280,10 +314,10 @@ export function startRun(action: StartRunAction): GameState {
     maxCandles: candles,
     sanity,
     maxSanity: sanity,
-    gold: modifiers?.startingGold ?? BASE_GOLD,
+    gold: modifiers?.startingGold ?? def?.startingGold ?? BASE_GOLD,
     baseCombat,
     deck,
-    relics: [],
+    relics: def ? [{ defId: def.startingRelicId }] : [],
     relicSlots: BASE_RELIC_SLOTS,
     consumables: [],
     consumableSlots: BASE_CONSUMABLE_SLOTS,
@@ -345,7 +379,7 @@ export function reduce(
       return { state, events: [] };
 
     case 'START_RUN':
-      return { state: startRun(action), events: [] };
+      return { state: startRun(action, registry), events: [] };
 
     case 'CHOOSE_NODE': {
       if (state.phase !== 'mapa' || !state.map) return illegal(state, 'no estas en el mapa');
@@ -454,12 +488,19 @@ export function reduce(
       if (c.selected.length === 0) return illegal(state, 'no hay cartas seleccionadas');
       const kept = c.hand.filter((id) => !c.selected.includes(id));
       const { hand, drawPile } = refill(kept, c.drawPile, c.handSize);
+      // Frenesi (Bestia, §8.5): cada descarte acumula +1.
+      const dVessel = registry.vessels[state.vessel];
+      const combatRelicState =
+        dVessel?.mechanic === 'frenesi'
+          ? { ...(c.combatRelicState ?? {}), frenesi: (c.combatRelicState?.frenesi ?? 0) + 1 }
+          : c.combatRelicState;
       const combat: CombatState = {
         ...c,
         hand,
         drawPile,
         selected: [],
         discardsLeft: c.discardsLeft - 1,
+        ...(combatRelicState ? { combatRelicState } : {}),
       };
       const relics = applyScalersOnDiscard(state.relics, registry);
       return commit({ ...state, combat, relics }, action);
@@ -494,11 +535,41 @@ export function reduce(
         extraRetrigger: mods.extraRetrigger,
         wildSuit: mods.wildSuit,
       };
+      // --- Mecanica de Recipiente (§8) ---
+      const vessel = registry.vessels[state.vessel];
+      const crs = c.combatRelicState ?? {};
+      let newCrs = crs;
+      const vesselEffects: Effect[] = [...(vessel?.innate ?? [])];
+      if (vessel?.mechanic === 'catalogo') {
+        const bonus = catalogoBonus(vessel, state.deck);
+        if (bonus > 0) vesselEffects.push({ kind: 'addFichas', n: bonus });
+      }
+      if (vessel?.mechanic === 'eco') {
+        const detected = detectHand(played, context.wildSuit).type;
+        const per = vessel.mechanicParams?.perRepeat ?? 1;
+        const code = handCode(detected);
+        const key = `eco_${detected}`;
+        let bonus = crs[key] ?? 0;
+        if (code === (crs.ecoLast ?? 0)) bonus += per; // repetiste el mismo tipo de mano
+        newCrs = { ...newCrs, [key]: bonus, ecoLast: code };
+        if (bonus > 0) vesselEffects.push({ kind: 'addMult', n: bonus });
+      }
+      if (vessel?.mechanic === 'frenesi') {
+        const fre = crs.frenesi ?? 0;
+        const mpf = vessel.mechanicParams?.multPerFrenesi ?? 1;
+        if (fre > 0) vesselEffects.push({ kind: 'addMult', n: fre * mpf });
+        newCrs = { ...newCrs, frenesi: 0 }; // se consume al jugar
+      }
+      const vesselRelic: ScoringRelic = {
+        defId: `vessel.${state.vessel}`,
+        onHandPlayed: vesselEffects,
+      };
+      const corduraMultBonus = bonoMultCordura(state.sanity) * (vessel?.corduraBonusMult ?? 1);
       const result = scoreHand({
         played,
         handLevels: state.handLevels,
-        relics: toScoringRelics(state.relics, registry),
-        corduraMultBonus: bonoMultCordura(state.sanity),
+        relics: [vesselRelic, ...toScoringRelics(state.relics, registry)],
+        corduraMultBonus,
         context,
       });
       const accumulated = c.accumulated + result.score;
@@ -515,7 +586,7 @@ export function reduce(
 
       // WIN: objetivo alcanzado.
       if (accumulated >= c.objective) {
-        const reward = combatGoldReward(kind) + interest(gold);
+        const reward = combatGoldReward(kind) + interest(gold, 5, vessel?.interestDivisor ?? 5);
         const endDestroy = combatEndDestroy(state.relics, registry);
         const d =
           endDestroy > 0
@@ -557,6 +628,7 @@ export function reduce(
           selected: [],
           handsLeft,
           accumulated,
+          combatRelicState: newCrs,
         };
         return commit({ ...state, relics, gold, sanity, combat }, action, result.events);
       }
@@ -634,6 +706,7 @@ export function reduce(
           maxCandles,
           candles: Math.min(next.candles, maxCandles),
           sanity: clamp(next.sanity + acq.sanityDelta, 0, next.maxSanity),
+          gold: Math.max(0, next.gold + acq.goldDelta),
         };
       } else if (opt.kind === 'arcano' && next.consumables.length < next.consumableSlots) {
         next = { ...next, consumables: [...next.consumables, { defId: opt.id }] };
