@@ -1,6 +1,6 @@
 // Pool de recompensas: elige reliquias reales del registry por rareza, escalada por Sima (§9.7).
 // Excluye las ya poseidas y las exclusivas de Recipiente (Bloque 8). Pity basico (§2.2) opcional.
-import { nextInt, pickWeighted, type Rarity, type RngState } from '@umbral/shared';
+import { nextInt, pickWeighted, type Rarity, type RngState, type VesselId } from '@umbral/shared';
 import type { ContentRegistry, RelicDef } from './dsl';
 
 const RARITY_WEIGHTS: Record<number, Record<Rarity, number>> = {
@@ -24,10 +24,14 @@ export function pickRelicRewards(
   sima: number,
   count: number,
   ownedIds: Set<string>,
+  /** Recipiente actual: sus reliquias exclusivas SI entran al pool (sesgo §8). */
+  vessel?: VesselId,
 ): RewardPick[] {
   const byRarity = new Map<Rarity, RelicDef[]>();
   for (const def of Object.values(registry.relics)) {
-    if (def.vessel || ownedIds.has(def.id)) continue; // exclusivas de Recipiente -> Bloque 8
+    // Excluye exclusivas de OTROS Recipientes; las del actual entran (pool sesgado §8).
+    if (def.vessel && def.vessel !== vessel) continue;
+    if (ownedIds.has(def.id)) continue;
     const g = byRarity.get(def.rarity) ?? [];
     g.push(def);
     byRarity.set(def.rarity, g);
