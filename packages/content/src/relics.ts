@@ -1,5 +1,5 @@
-// Reliquias generales como DATA + efectos declarativos (§11.1). Bloque 5: ~25 representativas,
-// una(s) por arquetipo (§13.4), para probar el DSL. Las 60 completas llegan en el Bloque 9.
+// Las 60 reliquias generales como DATA + efectos declarativos (§11.1). Cada arquetipo (§13.4)
+// tiene apoyos. Cero `if`-por-id en el engine: todo se interpreta desde estos objetos (§5.4).
 import type { RelicDef } from '@umbral/engine';
 
 export const GENERAL_RELICS: RelicDef[] = [
@@ -318,5 +318,321 @@ export const GENERAL_RELICS: RelicDef[] = [
     flavor: 'Siempre hay sitio para una mas.',
     tags: ['utilidad'],
     modifyCombat: { handSize: 1 },
+  },
+
+  // ---- Fichas plano (resto §11.1.b) ----
+  {
+    id: 'relic.ladrillo',
+    name: 'Ladrillo',
+    rarity: 'comun',
+    cost: 4,
+    flavor: 'Solido. Aburrido. Eficaz.',
+    tags: ['fichas'],
+    onHandPlayed: [{ kind: 'addFichas', n: 40 }],
+  },
+  {
+    id: 'relic.ceniza_compacta',
+    name: 'Ceniza Compacta',
+    rarity: 'comun',
+    cost: 4,
+    flavor: 'Lo que arde en la mano, se cuenta.',
+    tags: ['fichas'],
+    onHandPlayed: [{ kind: 'addFichas', n: 10, per: 'enhancedCardsInHand' }],
+  },
+  {
+    id: 'relic.piedra_de_amolar',
+    name: 'Piedra de Amolar',
+    rarity: 'pococomun',
+    cost: 6,
+    flavor: 'Cada filo nuevo la afila a ella.',
+    tags: ['fichas', 'escaladora'],
+    onHandPlayed: [{ kind: 'addFichas', n: 25 }],
+    scaler: { trigger: { on: 'enhanced' }, add: 5, as: 'fichas' },
+  },
+
+  // ---- Condicionales por tipo de mano (resto §11.1.d) ----
+  {
+    id: 'relic.trinidad',
+    name: 'Trinidad',
+    rarity: 'comun',
+    cost: 5,
+    flavor: 'Tres en uno.',
+    tags: ['mult'],
+    onHandPlayed: [{ kind: 'addMult', n: 10, when: { type: 'handType', any: ['trio'] } }],
+  },
+  {
+    id: 'relic.serpiente',
+    name: 'Serpiente',
+    rarity: 'pococomun',
+    cost: 7,
+    flavor: 'Se desliza en linea recta.',
+    tags: ['mult'],
+    // +6 con Escalera; +12 mas (una escalera siempre es de 5 cartas en UMBRAL).
+    onHandPlayed: [
+      {
+        kind: 'addMult',
+        n: 6,
+        when: { type: 'handType', any: ['escalera', 'escalera_color', 'escalera_real'] },
+      },
+      {
+        kind: 'addMult',
+        n: 12,
+        when: { type: 'handType', any: ['escalera', 'escalera_color', 'escalera_real'] },
+      },
+    ],
+  },
+  {
+    id: 'relic.banquete',
+    name: 'Banquete',
+    rarity: 'pococomun',
+    cost: 7,
+    flavor: 'Mesa llena, fichas llenas.',
+    tags: ['fichas'],
+    onHandPlayed: [{ kind: 'addFichas', n: 40, when: { type: 'handType', any: ['full'] } }],
+  },
+
+  // ---- Composicion / rango (resto §11.1.e) ----
+  {
+    id: 'relic.as_en_la_manga',
+    name: 'As en la Manga',
+    rarity: 'pococomun',
+    cost: 6,
+    flavor: 'Siempre uno mas, escondido.',
+    tags: ['fichas', 'mult'],
+    onCardScored: [
+      { kind: 'addFichas', n: 20, when: { type: 'isAce' } },
+      { kind: 'addMult', n: 2, when: { type: 'isAce' } },
+    ],
+  },
+
+  // ---- Retrigger (resto §11.1.f) ----
+  {
+    id: 'relic.eco_hueco',
+    name: 'Eco Hueco',
+    rarity: 'pococomun',
+    cost: 6,
+    flavor: 'La primera voz vuelve.',
+    tags: ['retrigger'],
+    retrigger: { when: { type: 'always' }, times: 1, firstOnly: true },
+  },
+  {
+    id: 'relic.resonancia_espectral',
+    name: 'Resonancia Espectral',
+    rarity: 'espectral',
+    cost: 13,
+    flavor: 'Lo sellado resuena de mas.',
+    tags: ['retrigger', 'espectral'],
+    retrigger: { when: { type: 'hasSeal' }, times: 2 },
+  },
+
+  // ---- Escaladoras (resto §11.1.h) ----
+  {
+    id: 'relic.cronica',
+    name: 'Cronica',
+    rarity: 'rara',
+    cost: 9,
+    flavor: 'Cada descarte queda escrito.',
+    tags: ['escaladora'],
+    scaler: { trigger: { on: 'discard' }, add: 2, as: 'fichas' },
+  },
+  {
+    id: 'relic.devorador',
+    name: 'Devorador',
+    rarity: 'espectral',
+    cost: 13,
+    flavor: 'Engorda con cada perdida.',
+    tags: ['escaladora', 'espectral'],
+    scaler: { trigger: { on: 'cardDestroyed' }, add: 0.2, as: 'xmult' },
+  },
+
+  // ---- Cambia-motor (resto §11.1.i) ----
+  {
+    id: 'relic.comodin',
+    name: 'Comodin',
+    rarity: 'rara',
+    cost: 11,
+    // TODO: la carta-comodin real (elegir rango) necesita targeting (render). Pasivo provisional.
+    flavor: 'Es lo que necesites que sea.',
+    tags: ['utilidad'],
+    onHandPlayed: [{ kind: 'addMult', n: 4 }],
+  },
+  {
+    id: 'relic.igualador',
+    name: 'Igualador',
+    rarity: 'rara',
+    cost: 10,
+    flavor: 'Ante el, todas las cartas valen lo mismo.',
+    tags: ['fichas'],
+    cardChipOverride: 10,
+  },
+  {
+    id: 'relic.memoria',
+    name: 'Memoria',
+    rarity: 'rara',
+    cost: 9,
+    // Aproximacion: crece +20 fichas por mano jugada (deberia premiar repetir el mismo tipo).
+    flavor: 'Recuerda, y cobra el recuerdo.',
+    tags: ['escaladora'],
+    scaler: { trigger: { on: 'handPlayed' }, add: 20, as: 'fichas' },
+  },
+
+  // ---- Espectrales (§11.1.j) ----
+  {
+    id: 'relic.ojo_que_no_duerme',
+    name: 'Ojo que No Duerme',
+    rarity: 'espectral',
+    cost: 12,
+    flavor: 'Ve la carta que viene. Siempre.',
+    tags: ['espectral', 'vidente'],
+    onAcquire: { maxCandlesDelta: -1 },
+  },
+  {
+    id: 'relic.simbiosis',
+    name: 'Simbiosis',
+    rarity: 'espectral',
+    cost: 14,
+    flavor: 'Cuantas mas sombras, mas fuerza.',
+    tags: ['espectral', 'xmult'],
+    xMult: [{ kind: 'xMult', factor: 1, perStep: { per: 'spectralRelics', step: 0.5 } }],
+  },
+  {
+    id: 'relic.hambre',
+    name: 'Hambre',
+    rarity: 'espectral',
+    cost: 13,
+    flavor: 'Multiplica, pero devora.',
+    tags: ['espectral', 'xmult'],
+    xMult: [{ kind: 'xMult', factor: 2 }],
+    onCombatEnd: { destroyRandomDeck: 1 },
+  },
+  {
+    id: 'relic.reloj_detenido',
+    name: 'Reloj Detenido',
+    rarity: 'espectral',
+    cost: 13,
+    flavor: 'El primer instante es eterno; el resto, niebla.',
+    tags: ['espectral', 'xmult'],
+    xMult: [
+      { kind: 'xMult', factor: 3, when: { type: 'firstHand' } },
+      { kind: 'xMult', factor: 0.75, when: { type: 'not', cond: { type: 'firstHand' } } },
+    ],
+  },
+  {
+    id: 'relic.eco_del_vacio',
+    name: 'Eco del Vacio',
+    rarity: 'espectral',
+    cost: 14,
+    flavor: 'En el abismo, todo se dobla.',
+    tags: ['espectral', 'xmult', 'cordura'],
+    xMult: [{ kind: 'xMult', factor: 2, when: { type: 'sanityBelow', value: 20 } }],
+  },
+
+  // ---- Malditas (§11.1.k) ----
+  {
+    id: 'relic.pacto_de_plomo',
+    name: 'Pacto de Plomo',
+    rarity: 'maldita',
+    cost: 15,
+    flavor: 'Pesa, pero cumple.',
+    tags: ['maldita', 'fichas'],
+    onHandPlayed: [{ kind: 'addFichas', n: 100 }],
+    modifyCombat: { hands: -1 },
+  },
+  {
+    id: 'relic.corona_de_espinas',
+    name: 'Corona de Espinas',
+    rarity: 'maldita',
+    cost: 16,
+    flavor: 'Reina y sangra.',
+    tags: ['maldita', 'xmult'],
+    xMult: [{ kind: 'xMult', factor: 3 }],
+    onCombatStart: { sanityDelta: -5 },
+  },
+  {
+    id: 'relic.cadena',
+    name: 'Cadena',
+    rarity: 'maldita',
+    cost: 15,
+    // La restriccion de no-vender/descartar reliquias se aplica en la tienda (Bloque 10).
+    flavor: 'No la sueltas. Ella no te suelta.',
+    tags: ['maldita', 'mult'],
+    onHandPlayed: [{ kind: 'addMult', n: 12 }],
+  },
+  {
+    id: 'relic.diezmo',
+    name: 'Diezmo',
+    rarity: 'maldita',
+    cost: 16,
+    flavor: 'Paga su parte. Cada vez.',
+    tags: ['maldita', 'xmult'],
+    xMult: [{ kind: 'xMult', factor: 2 }],
+    onUmbralEnd: { goldFactor: 0.8 },
+  },
+  {
+    id: 'relic.sacrificio',
+    name: 'Sacrificio',
+    rarity: 'maldita',
+    cost: 18,
+    flavor: 'Mucho poder, a costa del mazo.',
+    tags: ['maldita', 'mult'],
+    onHandPlayed: [{ kind: 'addMult', n: 20 }],
+    onCombatStart: { destroyRandomDeck: 1 },
+  },
+
+  // ---- Legendarias (§11.1.l) ----
+  {
+    id: 'relic.corazon_del_abismo',
+    name: 'Corazon del Abismo',
+    rarity: 'legendaria',
+    cost: 24,
+    flavor: 'Late con lo que pierdes.',
+    tags: ['legendaria', 'xmult', 'cordura'],
+    xMult: [{ kind: 'xMult', factor: 1, perStep: { per: 'corduraLost', step: 0.05 } }],
+  },
+  {
+    id: 'relic.el_contable_perfecto',
+    name: 'El Contable Perfecto',
+    rarity: 'legendaria',
+    cost: 26,
+    flavor: 'No se le escapa una moneda.',
+    tags: ['legendaria', 'economia', 'fichas'],
+    onHandPlayed: [{ kind: 'addFichas', n: 1, per: 'gold' }],
+  },
+  {
+    id: 'relic.caleidoscopio',
+    name: 'Caleidoscopio',
+    rarity: 'legendaria',
+    cost: 24,
+    flavor: 'Cada carta es del palo que mas te convenga.',
+    tags: ['legendaria', 'palo'],
+    wildSuit: true,
+  },
+  {
+    id: 'relic.eternidad',
+    name: 'Eternidad',
+    rarity: 'legendaria',
+    cost: 26,
+    flavor: 'Lo que resuena, resuena una vez mas.',
+    tags: ['legendaria', 'retrigger'],
+    extraRetriggerPerSource: 1,
+  },
+  {
+    id: 'relic.el_coleccionista_supremo',
+    name: 'El Coleccionista Supremo',
+    rarity: 'legendaria',
+    cost: 26,
+    flavor: 'Todo el mazo puntua, este o no en la mano.',
+    tags: ['legendaria', 'fichas'],
+    onHandPlayed: [{ kind: 'addFichas', n: 5, per: 'deckCards' }],
+  },
+  {
+    id: 'relic.sin_fondo',
+    name: 'Sin Fondo',
+    rarity: 'legendaria',
+    cost: 24,
+    flavor: 'No hay tope. Cuidado.',
+    tags: ['legendaria', 'retrigger'],
+    noRetriggerCap: true,
+    onAcquire: { maxCandlesDelta: -1 },
   },
 ];

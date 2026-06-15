@@ -18,13 +18,21 @@ import {
 import type { GameAction, StartRunAction } from './actions';
 import { type ContentRegistry, EMPTY_REGISTRY } from './content/dsl';
 import {
+  acquireEffect,
   applyScalersOnBossDefeated,
+  applyScalersOnDestroyed,
   applyScalersOnDiscard,
+  applyScalersOnEnhanced,
   applyScalersOnHandPlayed,
+  combatEndDestroy,
   combatModifiers,
+  combatStartEffects,
   countXMultRelics,
+  scoringModifiers,
   toScoringRelics,
+  umbralEndGoldFactor,
 } from './content/interpret';
+import { pickRelicRewards } from './content/pool';
 import { buildStandardDeck } from './deck';
 import {
   BASE_CANDLES,
@@ -43,7 +51,6 @@ import { bonoMultCordura, bossObjectiveFactor } from './run/cordura';
 import { combatGoldReward, interest, SKIP_REWARD_GOLD } from './run/economy';
 import { generateUmbralMap } from './run/map';
 import type { ObjectiveKind } from './run/objectives';
-import { generateReward } from './run/reward';
 import type { ScoreContext } from './scoring/effects';
 import { scoreHand } from './scoring/score';
 import {
@@ -53,6 +60,7 @@ import {
   type MapNode,
   type ReduceResult,
   type RelicInstance,
+  type RewardOption,
   STANDARD_HAND_TYPES,
   type UmbralMap,
 } from './types';
@@ -126,6 +134,22 @@ function objectiveKindOf(type: MapNode['type']): ObjectiveKind | null {
   return type === 'combate' || type === 'elite' || type === 'jefe' ? type : null;
 }
 
+/** Destruye n cartas aleatorias del mazo (clona el stream de reparto). Pureza. */
+function destroyRandomFromDeck(
+  rng: RngStreams,
+  deck: Card[],
+  n: number,
+): { rng: RngStreams; deck: Card[] } {
+  if (n <= 0 || deck.length === 0) return { rng, deck };
+  const deal = cloneRngState(rng.deal);
+  const order = shuffle(
+    deal,
+    deck.map((c) => c.id),
+  );
+  const destroyed = new Set(order.slice(0, Math.min(n, deck.length)));
+  return { rng: { ...rng, deal }, deck: deck.filter((c) => !destroyed.has(c.id)) };
+}
+
 /** Reparte un combate clonando el stream de reparto (pureza). */
 function dealHand(
   rng: RngStreams,
@@ -174,6 +198,22 @@ function makeCombatFor(
   return { rng: dealt.rng, combat };
 }
 
+/** Construye un draft de recompensa con reliquias reales del pool (§9.7). Clona rng.reward. */
+function buildRelicReward(
+  state: GameState,
+  registry: ContentRegistry,
+  count: number,
+): { rng: RngStreams; options: RewardOption[] } {
+  const reward = cloneRngState(state.rng.reward);
+  const owned = new Set(state.relics.map((r) => r.defId));
+  const picks = pickRelicRewards(registry, reward, state.sima, count, owned);
+  const options: RewardOption[] = [
+    ...picks.map((p) => ({ id: p.id, kind: 'relic' as const })),
+    { id: 'reward.skip', kind: 'skip' as const },
+  ];
+  return { rng: { ...state.rng, reward }, options };
+}
+
 /** Tras resolver una recompensa: avanzar de Umbral si el nodo era el Jefe, o volver al mapa. */
 function afterReward(
   state: GameState,
@@ -184,9 +224,10 @@ function afterReward(
   const node = state.map ? nodeById(state.map, state.map.currentNodeId) : undefined;
   if (node?.type === 'jefe') {
     const relics = applyScalersOnBossDefeated(state.relics, registry);
+    const gold = Math.floor(state.gold * umbralEndGoldFactor(state.relics, registry));
     if (state.umbral >= 8) {
       const result = { status: 'won' as const, depth: state.umbral, score: state.runScore };
-      return commit({ ...state, relics, phase: 'fin', result }, action, events);
+      return commit({ ...state, relics, gold, phase: 'fin', result }, action, events);
     }
     const mapRng = cloneRngState(state.rng.map);
     const nextUmbral = state.umbral + 1;
@@ -195,6 +236,7 @@ function afterReward(
       {
         ...state,
         relics,
+        gold,
         rng: { ...state.rng, map: mapRng },
         umbral: nextUmbral,
         sima: simaForUmbral(nextUmbral),
@@ -316,8 +358,23 @@ export function reduce(
       };
 
       if (objectiveKindOf(node.type)) {
-        const { rng, combat } = makeCombatFor({ ...state, map }, node, registry);
-        return commit({ ...state, map, rng, phase: 'combate', combat }, action);
+        const cs = combatStartEffects(state.relics, registry);
+        let base: GameState = { ...state, map };
+        if (cs.sanityDelta !== 0) {
+          base = { ...base, sanity: clamp(base.sanity + cs.sanityDelta, 0, base.maxSanity) };
+        }
+        if (cs.destroyRandomDeck > 0) {
+          const d = destroyRandomFromDeck(base.rng, base.deck, cs.destroyRandomDeck);
+          const destroyed = base.deck.length - d.deck.length;
+          base = {
+            ...base,
+            rng: d.rng,
+            deck: d.deck,
+            relics: applyScalersOnDestroyed(base.relics, registry, destroyed),
+          };
+        }
+        const { rng, combat } = makeCombatFor(base, node, registry);
+        return commit({ ...base, rng, phase: 'combate', combat }, action);
       }
       switch (node.type) {
         case 'tienda':
@@ -335,11 +392,19 @@ export function reduce(
             { ...state, map, phase: 'evento', pendingEvent: { eventId: 'evento.placeholder' } },
             action,
           );
-        case 'tesoro':
+        case 'tesoro': {
+          const rew = buildRelicReward({ ...state, map }, registry, 2);
           return commit(
-            { ...state, map, phase: 'recompensa', pendingReward: generateReward('combate') },
+            {
+              ...state,
+              map,
+              rng: rew.rng,
+              phase: 'recompensa',
+              pendingReward: { options: rew.options },
+            },
             action,
           );
+        }
         case 'descanso':
           return commit({ ...state, map, phase: 'descanso' }, action);
         case 'santuario':
@@ -412,6 +477,7 @@ export function reduce(
         .map((id) => byId.get(id))
         .filter((card): card is Card => card !== undefined);
       const startingHands = state.baseCombat.hands + combatModifiers(state.relics, registry).hands;
+      const mods = scoringModifiers(state.relics, registry);
       const context: ScoreContext = {
         gold: state.gold,
         sanity: state.sanity,
@@ -419,6 +485,14 @@ export function reduce(
         bossesDefeated: Math.max(0, state.umbral - 1),
         cardsInHandNotPlayed: c.hand.length - c.selected.length,
         xmultRelics: countXMultRelics(state.relics, registry),
+        deckCards: state.deck.length,
+        corduraLost: state.maxSanity - state.sanity,
+        spectralRelics: mods.spectralRelics,
+        enhancedCardsInHand: c.hand.filter((id) => byId.get(id)?.enhancement != null).length,
+        flatCardChips: mods.flatCardChips,
+        noRetriggerCap: mods.noRetriggerCap,
+        extraRetrigger: mods.extraRetrigger,
+        wildSuit: mods.wildSuit,
       };
       const result = scoreHand({
         played,
@@ -442,16 +516,29 @@ export function reduce(
       // WIN: objetivo alcanzado.
       if (accumulated >= c.objective) {
         const reward = combatGoldReward(kind) + interest(gold);
+        const endDestroy = combatEndDestroy(state.relics, registry);
+        const d =
+          endDestroy > 0
+            ? destroyRandomFromDeck(state.rng, state.deck, endDestroy)
+            : { rng: state.rng, deck: state.deck };
+        const relicsAfter = applyScalersOnDestroyed(
+          relics,
+          registry,
+          state.deck.length - d.deck.length,
+        );
+        const rew = buildRelicReward({ ...state, rng: d.rng }, registry, 2);
         return commit(
           {
             ...state,
-            relics,
+            relics: relicsAfter,
+            rng: rew.rng,
+            deck: d.deck,
             gold: gold + reward,
             sanity,
             runScore: state.runScore + accumulated,
             combat: null,
             phase: 'recompensa',
-            pendingReward: generateReward(kind),
+            pendingReward: { options: rew.options },
           },
           action,
           result.events,
@@ -539,7 +626,15 @@ export function reduce(
       if (opt.kind === 'skip') {
         next = { ...next, gold: next.gold + SKIP_REWARD_GOLD };
       } else if (opt.kind === 'relic' && next.relics.length < next.relicSlots) {
-        next = { ...next, relics: [...next.relics, { defId: opt.id }] };
+        const acq = acquireEffect(opt.id, registry);
+        const maxCandles = Math.max(1, next.maxCandles + acq.maxCandlesDelta);
+        next = {
+          ...next,
+          relics: [...next.relics, { defId: opt.id }],
+          maxCandles,
+          candles: Math.min(next.candles, maxCandles),
+          sanity: clamp(next.sanity + acq.sanityDelta, 0, next.maxSanity),
+        };
       } else if (opt.kind === 'arcano' && next.consumables.length < next.consumableSlots) {
         next = { ...next, consumables: [...next.consumables, { defId: opt.id }] };
       }
@@ -619,11 +714,13 @@ export function reduce(
 
       let deck = state.deck;
       let handLevels = state.handLevels;
+      let enhancedCount = 0;
       if (def.applyEnhancement !== undefined || def.applySeal !== undefined) {
         // Augurio: aplica mejora/sello a las cartas objetivo (en el mazo).
         const max = def.maxTargets ?? 1;
         const targets = new Set(action.targets.slice(0, max));
         if (targets.size === 0) return illegal(state, 'el augurio necesita cartas objetivo');
+        if (def.applyEnhancement !== undefined) enhancedCount = targets.size;
         deck = state.deck.map((card) =>
           targets.has(card.id)
             ? {
@@ -647,7 +744,8 @@ export function reduce(
         }
       }
       const consumables = state.consumables.filter((_, i) => i !== idx);
-      return commit({ ...state, deck, handLevels, consumables }, action);
+      const relics = applyScalersOnEnhanced(state.relics, registry, enhancedCount);
+      return commit({ ...state, deck, handLevels, consumables, relics }, action);
     }
 
     // Tienda (compra/venta/reroll): contenido en el Bloque 10.

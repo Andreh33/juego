@@ -22,6 +22,7 @@ export type Condition =
   | { type: 'firstHand' }
   | { type: 'allFourSuits' }
   | { type: 'handHasFigure' }
+  | { type: 'hasSeal' }
   | { type: 'not'; cond: Condition };
 
 /** Conteos del contexto que escalan un efecto (efecto.n × conteo). */
@@ -32,7 +33,11 @@ export type CountRef =
   | 'acesPlayed'
   | 'gold'
   | 'xmultRelics'
-  | 'bossesDefeated';
+  | 'bossesDefeated'
+  | 'deckCards'
+  | 'corduraLost'
+  | 'spectralRelics'
+  | 'enhancedCardsInHand';
 
 export type Effect =
   | { kind: 'addFichas'; n: number; per?: CountRef; max?: number; when?: Condition }
@@ -46,7 +51,7 @@ export interface ScoringRelic {
   onCardScored?: Effect[];
   onHandPlayed?: Effect[];
   xMult?: Effect[];
-  retrigger?: { when: Condition; times: number };
+  retrigger?: { when: Condition; times: number; firstOnly?: boolean };
 }
 
 /** Contexto global del scoring (lo aporta reduce: §10.3, economia, etc.). */
@@ -59,4 +64,20 @@ export interface ScoreContext {
   cardsInHandNotPlayed: number;
   /** Nº de reliquias con ×mult (para Convergencia, etc.). */
   xmultRelics: number;
+  /** Nº de cartas del mazo completo (El Coleccionista Supremo). */
+  deckCards: number;
+  /** Cordura perdida = maxSanity - sanity (Corazon del Abismo, Sello Roto). */
+  corduraLost: number;
+  /** Nº de reliquias Espectrales (Simbiosis). */
+  spectralRelics: number;
+  /** Nº de cartas con mejora en mano (Ceniza Compacta). */
+  enhancedCardsInHand: number;
+  /** Si != null, TODAS las cartas (no Piedra) valen estas fichas base (Igualador). */
+  flatCardChips: number | null;
+  /** Elimina el tope de retrigger (Sin Fondo). */
+  noRetriggerCap: boolean;
+  /** Disparos extra por cada fuente de retrigger (Eternidad). */
+  extraRetrigger: number;
+  /** Trata todos los palos como uno para el Color (Caleidoscopio). */
+  wildSuit: boolean;
 }

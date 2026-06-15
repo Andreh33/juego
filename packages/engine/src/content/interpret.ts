@@ -46,6 +46,85 @@ export function countXMultRelics(
   return n;
 }
 
+/** Modificadores GLOBALES del scoring (Igualador, Sin Fondo, Eternidad, Caleidoscopio, Simbiosis). */
+export function scoringModifiers(
+  relics: readonly RelicInstance[],
+  registry: ContentRegistry,
+): {
+  flatCardChips: number | null;
+  noRetriggerCap: boolean;
+  extraRetrigger: number;
+  wildSuit: boolean;
+  spectralRelics: number;
+} {
+  let flatCardChips: number | null = null;
+  let noRetriggerCap = false;
+  let extraRetrigger = 0;
+  let wildSuit = false;
+  let spectralRelics = 0;
+  for (const inst of relics) {
+    const def = registry.relics[inst.defId];
+    if (!def) continue;
+    if (def.cardChipOverride !== undefined) flatCardChips = def.cardChipOverride;
+    if (def.noRetriggerCap) noRetriggerCap = true;
+    if (def.extraRetriggerPerSource) extraRetrigger += def.extraRetriggerPerSource;
+    if (def.wildSuit) wildSuit = true;
+    if (def.rarity === 'espectral') spectralRelics++;
+  }
+  return { flatCardChips, noRetriggerCap, extraRetrigger, wildSuit, spectralRelics };
+}
+
+/** Efecto de adquisicion de una reliquia (al cogerla del draft). */
+export function acquireEffect(
+  defId: string,
+  registry: ContentRegistry,
+): {
+  maxCandlesDelta: number;
+  sanityDelta: number;
+} {
+  const a = registry.relics[defId]?.onAcquire;
+  return { maxCandlesDelta: a?.maxCandlesDelta ?? 0, sanityDelta: a?.sanityDelta ?? 0 };
+}
+
+/** Efectos agregados al iniciar combate. */
+export function combatStartEffects(
+  relics: readonly RelicInstance[],
+  registry: ContentRegistry,
+): { sanityDelta: number; destroyRandomDeck: number } {
+  let sanityDelta = 0;
+  let destroyRandomDeck = 0;
+  for (const inst of relics) {
+    const e = registry.relics[inst.defId]?.onCombatStart;
+    if (!e) continue;
+    sanityDelta += e.sanityDelta ?? 0;
+    destroyRandomDeck += e.destroyRandomDeck ?? 0;
+  }
+  return { sanityDelta, destroyRandomDeck };
+}
+
+/** Cartas a destruir al ganar un combate (Hambre). */
+export function combatEndDestroy(
+  relics: readonly RelicInstance[],
+  registry: ContentRegistry,
+): number {
+  let n = 0;
+  for (const inst of relics) n += registry.relics[inst.defId]?.onCombatEnd?.destroyRandomDeck ?? 0;
+  return n;
+}
+
+/** Factor de oro al terminar un Umbral (Diezmo). Producto de todos los factores. */
+export function umbralEndGoldFactor(
+  relics: readonly RelicInstance[],
+  registry: ContentRegistry,
+): number {
+  let factor = 1;
+  for (const inst of relics) {
+    const f = registry.relics[inst.defId]?.onUmbralEnd?.goldFactor;
+    if (f !== undefined) factor *= f;
+  }
+  return factor;
+}
+
 /** Suma de modificadores de combate de todas las reliquias. */
 export function combatModifiers(
   relics: readonly RelicInstance[],
@@ -107,5 +186,31 @@ export function applyScalersOnBossDefeated(
   return relics.map((inst) => {
     const sc = registry.relics[inst.defId]?.scaler;
     return sc?.trigger.on === 'bossDefeated' ? bump(inst, sc.add) : inst;
+  });
+}
+
+/** Actualiza escaladoras al mejorar cartas (trigger enhanced), `count` veces. */
+export function applyScalersOnEnhanced(
+  relics: readonly RelicInstance[],
+  registry: ContentRegistry,
+  count: number,
+): RelicInstance[] {
+  if (count <= 0) return [...relics];
+  return relics.map((inst) => {
+    const sc = registry.relics[inst.defId]?.scaler;
+    return sc?.trigger.on === 'enhanced' ? bump(inst, sc.add * count) : inst;
+  });
+}
+
+/** Actualiza escaladoras al destruir cartas (trigger cardDestroyed), `count` veces. */
+export function applyScalersOnDestroyed(
+  relics: readonly RelicInstance[],
+  registry: ContentRegistry,
+  count: number,
+): RelicInstance[] {
+  if (count <= 0) return [...relics];
+  return relics.map((inst) => {
+    const sc = registry.relics[inst.defId]?.scaler;
+    return sc?.trigger.on === 'cardDestroyed' ? bump(inst, sc.add * count) : inst;
   });
 }
