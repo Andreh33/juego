@@ -32,5 +32,44 @@
     "parser": {
       "tailwindDirectives": true
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/engine/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "react": "INV-3: el engine es TS puro, sin React.",
+                  "react-dom": "INV-3: el engine es TS puro, sin React.",
+                  "pixi.js": "INV-3: el engine no conoce el render (Pixi vive en game-render).",
+                  "@pixi/core": "INV-3: el engine no conoce el render (Pixi vive en game-render).",
+                  "@pixi/app": "INV-3: el engine no conoce el render (Pixi vive en game-render).",
+                  "@pixi/sprite": "INV-3: el engine no conoce el render (Pixi vive en game-render).",
+                  "@pixi/graphics": "INV-3: el engine no conoce el render (Pixi vive en game-render).",
+                  "zustand": "INV-3: el engine no tiene store ni estado reactivo.",
+                  "@umbral/game-render": "INV-3: el engine no depende del render."
+                }
+              }
+            },
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "document": "INV-3: el engine es TS puro, sin DOM.",
+                  "window": "INV-3: el engine es TS puro, sin DOM.",
+                  "navigator": "INV-3: el engine es TS puro, sin DOM.",
+                  "localStorage": "INV-3: el engine es TS puro, sin DOM.",
+                  "sessionStorage": "INV-3: el engine es TS puro, sin DOM."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }
