@@ -1,6 +1,6 @@
 import type { Card, Enhancement, Rank, Seal, Suit } from '@umbral/shared';
 import { describe, expect, it } from 'vitest';
-import type { RelicScoreDef } from './effects';
+import type { ScoringRelic } from './effects';
 import { scoreHand } from './score';
 
 let counter = 0;
@@ -18,11 +18,11 @@ function mk(
   };
 }
 
-const CATALIZADOR: RelicScoreDef = {
+const CATALIZADOR: ScoringRelic = {
   defId: 'relic.catalizador',
   onHandPlayed: [{ kind: 'addMult', n: 4 }],
 };
-const ESPEJO_NEGRO: RelicScoreDef = {
+const ESPEJO_NEGRO: ScoringRelic = {
   defId: 'relic.espejo_negro',
   xMult: [{ kind: 'xMult', factor: 1.5 }],
 };
@@ -153,7 +153,7 @@ describe('retriggers (§7.6)', () => {
   });
 
   it('el tope de 20 disparos por carta se respeta', () => {
-    const bigRetrigger: RelicScoreDef = {
+    const bigRetrigger: ScoringRelic = {
       defId: 'relic.test_retrigger',
       retrigger: { when: { type: 'always' }, times: 50 },
     };
@@ -169,7 +169,7 @@ describe('retriggers (§7.6)', () => {
 
 describe('reliquias condicionales y orden (§7.3)', () => {
   it('onCardScored condicional por palo', () => {
-    const corazonNegro: RelicScoreDef = {
+    const corazonNegro: ScoringRelic = {
       defId: 'relic.corazon_negro',
       onCardScored: [{ kind: 'addMult', n: 3, when: { type: 'suit', suit: 'CALIZ' } }],
     };
@@ -183,12 +183,12 @@ describe('reliquias condicionales y orden (§7.3)', () => {
   });
 
   it('el orden de las reliquias cambia el resultado con ×mult condicionales', () => {
-    const setup: RelicScoreDef = { defId: 'setup', onHandPlayed: [{ kind: 'addMult', n: 7 }] };
-    const a: RelicScoreDef = {
+    const setup: ScoringRelic = { defId: 'setup', onHandPlayed: [{ kind: 'addMult', n: 7 }] };
+    const a: ScoringRelic = {
       defId: 'A',
       xMult: [{ kind: 'xMult', factor: 2, when: { type: 'always' } }],
     };
-    const b: RelicScoreDef = {
+    const b: ScoringRelic = {
       defId: 'B',
       xMult: [{ kind: 'xMult', factor: 2, when: { type: 'multAtLeast', value: 10 } }],
     };
