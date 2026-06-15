@@ -1,14 +1,12 @@
-// Arcanos consumibles como DATA (§11.2 Augurios, §11.3 Sellos). Bloque 5: basicos para probar
-// el DSL via USE_CONSUMABLE. El catalogo completo (+ Conjuros, §11.4) llega en el Bloque 10.
-import type { ConsumableDef } from '@umbral/engine';
+// Arcanos consumibles como DATA: Augurios (§11.2), Sellos (§11.3), Conjuros (§11.4).
+import type { ConsumableDef, HandType } from '@umbral/engine';
 
-export const CONSUMABLES: ConsumableDef[] = [
-  // Augurios (modifican cartas, §11.2)
+const AUGURIOS: ConsumableDef[] = [
   {
     id: 'augurio.grabador',
     name: 'Augurio del Grabador',
     kind: 'augurio',
-    flavor: 'Talla el numero en la carne de la carta.',
+    flavor: 'Talla el numero en la carta.',
     applyEnhancement: 'grabado',
     maxTargets: 1,
   },
@@ -24,31 +22,208 @@ export const CONSUMABLES: ConsumableDef[] = [
     id: 'augurio.unto',
     name: 'Augurio del Unto',
     kind: 'augurio',
-    flavor: 'Unta la carta con algo que brilla mal.',
+    flavor: 'Algo que brilla mal.',
     applyEnhancement: 'untado',
+    maxTargets: 1,
+  },
+  {
+    id: 'augurio.oro',
+    name: 'Augurio del Oro',
+    kind: 'augurio',
+    flavor: 'Dos cartas doradas.',
+    applyEnhancement: 'dorado',
+    maxTargets: 2,
+  },
+  {
+    id: 'augurio.cristal',
+    name: 'Augurio de Cristal',
+    kind: 'augurio',
+    flavor: 'Fragil, pero brillante.',
+    applyEnhancement: 'cristal',
+    maxTargets: 1,
+  },
+  {
+    id: 'augurio.piedra',
+    name: 'Augurio de Piedra',
+    kind: 'augurio',
+    flavor: 'Sin rango ni palo; pura mole.',
+    applyEnhancement: 'piedra',
+    maxTargets: 1,
+  },
+  {
+    id: 'augurio.espejo',
+    name: 'Augurio del Espejo',
+    kind: 'augurio',
+    flavor: 'Refleja a su vecina.',
+    applyEnhancement: 'espejo',
+    maxTargets: 1,
+  },
+  {
+    id: 'augurio.cambio',
+    name: 'Augurio del Cambio',
+    kind: 'augurio',
+    flavor: 'Iguala el palo al de la primera.',
+    changeSuitToFirst: true,
+    maxTargets: 3,
+  },
+  {
+    id: 'augurio.igualar',
+    name: 'Augurio del Igualar',
+    kind: 'augurio',
+    flavor: 'Iguala el rango al de la primera (forja Tríos/Pókers).',
+    matchRankToFirst: true,
+    maxTargets: 3,
+  },
+  {
+    id: 'augurio.ascenso',
+    name: 'Augurio del Ascenso',
+    kind: 'augurio',
+    flavor: '+1 rango a hasta 3 cartas.',
+    rankDelta: 1,
+    maxTargets: 3,
+  },
+  {
+    id: 'augurio.descenso',
+    name: 'Augurio del Descenso',
+    kind: 'augurio',
+    flavor: '-1 rango a hasta 3 cartas (para escaleras).',
+    rankDelta: -1,
+    maxTargets: 3,
+  },
+  {
+    id: 'augurio.vacio',
+    name: 'Augurio del Vacio',
+    kind: 'augurio',
+    flavor: 'Depura: destruye hasta 2 cartas.',
+    destroyTargets: true,
+    maxTargets: 2,
+  },
+  {
+    id: 'augurio.doble',
+    name: 'Augurio del Doble',
+    kind: 'augurio',
+    flavor: 'Duplica una carta.',
+    duplicateTargets: true,
+    maxTargets: 1,
+  },
+  {
+    id: 'augurio.sello_ocre',
+    name: 'Augurio del Sello Ocre',
+    kind: 'augurio',
+    flavor: 'Sella en oro.',
+    applySeal: 'ocre',
     maxTargets: 1,
   },
   {
     id: 'augurio.sello_sangre',
     name: 'Augurio del Sello de Sangre',
     kind: 'augurio',
-    flavor: 'Sella la carta para que vuelva a hablar.',
+    flavor: 'Sella para que vuelva a hablar.',
     applySeal: 'sangre',
     maxTargets: 1,
   },
-  // Sellos (suben nivel de manos, §11.3)
   {
-    id: 'sello.pareja',
-    name: 'Sello de la Pareja',
-    kind: 'sello',
-    flavor: 'Eleva el rango de lo que viene en dos.',
-    levelUpHand: 'pareja',
+    id: 'augurio.sello_verdin',
+    name: 'Augurio del Sello de Verdin',
+    kind: 'augurio',
+    flavor: 'Sella con cardenillo.',
+    applySeal: 'verdin',
+    maxTargets: 1,
   },
+  {
+    id: 'augurio.sello_violeta',
+    name: 'Augurio del Sello Violeta',
+    kind: 'augurio',
+    flavor: 'Sella con lo de abajo.',
+    applySeal: 'violeta',
+    maxTargets: 1,
+  },
+];
+
+const HAND_TYPE_SELLOS: { type: HandType; name: string }[] = [
+  { type: 'carta_alta', name: 'Sello de la Carta Alta' },
+  { type: 'pareja', name: 'Sello de la Pareja' },
+  { type: 'doble_pareja', name: 'Sello de la Doble' },
+  { type: 'trio', name: 'Sello del Trio' },
+  { type: 'escalera', name: 'Sello de la Escalera' },
+  { type: 'color', name: 'Sello del Color' },
+  { type: 'full', name: 'Sello del Full' },
+  { type: 'poker', name: 'Sello del Poker' },
+  { type: 'escalera_color', name: 'Sello de la Escalera de Color' },
+  { type: 'escalera_real', name: 'Sello de la Real' },
+];
+
+const SELLOS: ConsumableDef[] = [
+  ...HAND_TYPE_SELLOS.map(
+    (s): ConsumableDef => ({
+      id: `sello.${s.type}`,
+      name: s.name,
+      kind: 'sello',
+      flavor: 'Eleva el nivel base de ese tipo de mano.',
+      levelUpHand: s.type,
+    }),
+  ),
   {
     id: 'sello.universal',
     name: 'Sello Universal',
     kind: 'sello',
-    flavor: 'Eleva todo a la vez. Caro y raro.',
+    flavor: 'Eleva todas las manos. Raro y caro.',
     levelUpHand: 'all',
   },
 ];
+
+const CONJUROS: ConsumableDef[] = [
+  {
+    id: 'conjuro.sangre',
+    name: 'Conjuro de Sangre',
+    kind: 'conjuro',
+    flavor: '-5 Cordura por poder.',
+    sanityDelta: -5,
+  },
+  {
+    id: 'conjuro.doble_filo',
+    name: 'Conjuro del Doble Filo',
+    kind: 'conjuro',
+    flavor: 'Destruye 1 carta; gana 1 reliquia espectral.',
+    destroyRandomDeck: 1,
+    gainRandomRelicRarity: 'espectral',
+  },
+  {
+    id: 'conjuro.vidente',
+    name: 'Conjuro del Vidente',
+    kind: 'conjuro',
+    flavor: 'Ve y reordena tus proximas cartas (render).',
+  },
+  {
+    id: 'conjuro.carne',
+    name: 'Conjuro de la Carne',
+    kind: 'conjuro',
+    flavor: 'Iguala 3 cartas al mismo rango; -3 Cordura.',
+    matchRankToFirst: true,
+    maxTargets: 3,
+    sanityDelta: -3,
+  },
+  {
+    id: 'conjuro.olvido',
+    name: 'Conjuro del Olvido',
+    kind: 'conjuro',
+    flavor: 'Olvida una maldicion; -10 Cordura.',
+    sanityDelta: -10,
+  },
+  {
+    id: 'conjuro.abismo',
+    name: 'Conjuro del Abismo',
+    kind: 'conjuro',
+    flavor: 'Cordura a 0; una Legendaria. Riesgo maximo.',
+    sanityToZero: true,
+    gainRandomRelicRarity: 'legendaria',
+  },
+  {
+    id: 'conjuro.ofrenda',
+    name: 'Conjuro de la Ofrenda',
+    kind: 'conjuro',
+    flavor: 'Sacrifica una reliquia por 2 superiores (render).',
+  },
+];
+
+export const CONSUMABLES: ConsumableDef[] = [...AUGURIOS, ...SELLOS, ...CONJUROS];

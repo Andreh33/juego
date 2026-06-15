@@ -4,6 +4,7 @@ import { CONSUMABLES } from './consumables';
 import { GENERAL_RELICS } from './relics';
 import { VESSEL_RELICS } from './vessel-relics';
 import { VESSELS } from './vessels';
+import { VOUCHERS } from './vouchers';
 
 function byId<T extends { id: string }>(items: readonly T[]): Record<string, T> {
   const out: Record<string, T> = {};
@@ -16,9 +17,11 @@ export const REGISTRY: ContentRegistry = {
   relics: byId([...GENERAL_RELICS, ...VESSEL_RELICS]),
   consumables: byId(CONSUMABLES),
   vessels: byId(VESSELS),
+  vouchers: byId(VOUCHERS),
 };
 
 export { CONSUMABLES } from './consumables';
 export { GENERAL_RELICS } from './relics';
 export { VESSEL_RELICS } from './vessel-relics';
 export { VESSELS } from './vessels';
+export { VOUCHERS } from './vouchers';
