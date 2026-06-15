@@ -1519,6 +1519,28 @@ Si algo no está claro **al implementarlo**, PARA y pregunta. No asumas:
 
 Todo lo demás está decidido aquí. Ejecuta **bloque a bloque, con gate**, empezando por el **Bloque 0**. Espera `OK`.
 
+## 22.5 El DSL de efectos (implementado en Bloque 5)
+
+> Esta sección faltaba en la biblia y la define la implementación (Bloque 5). Efectos = **data declarativa**, nunca funciones ni `eval` (§5.4, §24.8). El engine interpreta; `packages/content` solo aporta objetos.
+
+**`Condition`** (se evalúa contra el contexto de puntuación):
+`always` · `suit{suit}` · `rank{rank}` · `isFace` · `isAce` · `hasEnhancement` · `multAtLeast{value}` · `handType{any:[...]}` · `exactlyCards{count}` · `atLeastCards{count}` · `goldAtLeast{value}` · `sanityBelow{value}` · `firstHand` · `allFourSuits` · `handHasFigure` · `not{cond}`.
+
+**`CountRef`** (escala un efecto: `efecto.n × conteo`):
+`playedCards` · `cardsInHandNotPlayed` · `figuresPlayed` · `acesPlayed` · `gold` · `xmultRelics` · `bossesDefeated`.
+
+**`Effect`**:
+- `{kind:'addFichas', n, per?, max?, when?}` — suma fichas (paso 3d/4).
+- `{kind:'addMult', n, per?, max?, when?}` — suma mult (paso 3d/4).
+- `{kind:'xFichas', factor, when?}` — multiplica fichas (paso 5).
+- `{kind:'xMult', factor, perStep?{per,step}, when?}` — multiplica mult (paso 5). `perStep` → `factor = 1 + conteo×step`.
+
+**`RelicDef`** (subset de hooks §5.4 + extensiones): `onCardScored?: Effect[]` · `onHandPlayed?: Effect[]` · `xMult?: Effect[]` · `retrigger?{when,times}` · `scaler?{trigger,add,as}` (escaladoras con estado persistente en `RelicInstance.state.acc`; triggers: `handPlayed{handType?}`/`cardScored`/`discard`/`bossDefeated`) · `modifyCombat?{hands?,discards?,handSize?}`.
+
+**`ConsumableDef`**: `augurio` (`applyEnhancement`/`applySeal` + `maxTargets`) · `sello` (`levelUpHand: HandType|'all'`) · `conjuro` (Bloque 10).
+
+> Si una reliquia futura necesita un verbo que el DSL no expresa, se **extiende el DSL una vez** (un `Condition`/`Effect`/`CountRef` nuevo bien definido), nunca un `if`-por-id en el engine.
+
 ---
 
 # 23. DESPLIEGUE EN VERCEL + SUPABASE

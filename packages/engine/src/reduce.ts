@@ -16,6 +16,15 @@ import {
   shuffle,
 } from '@umbral/shared';
 import type { GameAction, StartRunAction } from './actions';
+import { type ContentRegistry, EMPTY_REGISTRY } from './content/dsl';
+import {
+  applyScalersOnBossDefeated,
+  applyScalersOnDiscard,
+  applyScalersOnHandPlayed,
+  combatModifiers,
+  countXMultRelics,
+  toScoringRelics,
+} from './content/interpret';
 import { buildStandardDeck } from './deck';
 import {
   BASE_CANDLES,
@@ -35,6 +44,7 @@ import { combatGoldReward, interest, SKIP_REWARD_GOLD } from './run/economy';
 import { generateUmbralMap } from './run/map';
 import type { ObjectiveKind } from './run/objectives';
 import { generateReward } from './run/reward';
+import type { ScoreContext } from './scoring/effects';
 import { scoreHand } from './scoring/score';
 import {
   type CombatState,
@@ -131,21 +141,27 @@ function dealHand(
   };
 }
 
-/** Crea el CombatState para un nodo de combate/elite/jefe (objetivo + reparto). */
-function makeCombatFor(state: GameState, node: MapNode): { rng: RngStreams; combat: CombatState } {
+/** Crea el CombatState para un nodo de combate/elite/jefe (objetivo + reparto + modificadores). */
+function makeCombatFor(
+  state: GameState,
+  node: MapNode,
+  registry: ContentRegistry,
+): { rng: RngStreams; combat: CombatState } {
+  const mod = combatModifiers(state.relics, registry);
+  const handSize = Math.max(1, state.baseCombat.handSize + mod.handSize);
   const dealt = dealHand(
     state.rng,
     state.deck.map((c) => c.id),
-    state.baseCombat.handSize,
+    handSize,
   );
   let objective = node.objective ?? 0;
   if (node.type === 'jefe') objective = Math.round(objective * bossObjectiveFactor(state.sanity));
   const combat: CombatState = {
     objective,
     accumulated: 0,
-    handsLeft: state.baseCombat.hands,
-    discardsLeft: state.baseCombat.discards,
-    handSize: state.baseCombat.handSize,
+    handsLeft: Math.max(1, state.baseCombat.hands + mod.hands),
+    discardsLeft: Math.max(0, state.baseCombat.discards + mod.discards),
+    handSize,
     hand: dealt.hand,
     selected: [],
     drawPile: dealt.drawPile,
@@ -159,12 +175,18 @@ function makeCombatFor(state: GameState, node: MapNode): { rng: RngStreams; comb
 }
 
 /** Tras resolver una recompensa: avanzar de Umbral si el nodo era el Jefe, o volver al mapa. */
-function afterReward(state: GameState, action: GameAction, events: FeelEvent[] = []): ReduceResult {
+function afterReward(
+  state: GameState,
+  action: GameAction,
+  registry: ContentRegistry,
+  events: FeelEvent[] = [],
+): ReduceResult {
   const node = state.map ? nodeById(state.map, state.map.currentNodeId) : undefined;
   if (node?.type === 'jefe') {
+    const relics = applyScalersOnBossDefeated(state.relics, registry);
     if (state.umbral >= 8) {
       const result = { status: 'won' as const, depth: state.umbral, score: state.runScore };
-      return commit({ ...state, phase: 'fin', result }, action, events);
+      return commit({ ...state, relics, phase: 'fin', result }, action, events);
     }
     const mapRng = cloneRngState(state.rng.map);
     const nextUmbral = state.umbral + 1;
@@ -172,6 +194,7 @@ function afterReward(state: GameState, action: GameAction, events: FeelEvent[] =
     return commit(
       {
         ...state,
+        relics,
         rng: { ...state.rng, map: mapRng },
         umbral: nextUmbral,
         sima: simaForUmbral(nextUmbral),
@@ -270,7 +293,11 @@ function combatGuard(state: GameState): CombatState | null {
   return state.phase === 'combate' && state.combat ? state.combat : null;
 }
 
-export function reduce(state: GameState, action: GameAction): ReduceResult {
+export function reduce(
+  state: GameState,
+  action: GameAction,
+  registry: ContentRegistry = EMPTY_REGISTRY,
+): ReduceResult {
   switch (action.type) {
     case 'TICK':
       return { state, events: [] };
@@ -289,7 +316,7 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
       };
 
       if (objectiveKindOf(node.type)) {
-        const { rng, combat } = makeCombatFor({ ...state, map }, node);
+        const { rng, combat } = makeCombatFor({ ...state, map }, node, registry);
         return commit({ ...state, map, rng, phase: 'combate', combat }, action);
       }
       switch (node.type) {
@@ -369,7 +396,8 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
         selected: [],
         discardsLeft: c.discardsLeft - 1,
       };
-      return commit({ ...state, combat }, action);
+      const relics = applyScalersOnDiscard(state.relics, registry);
+      return commit({ ...state, combat, relics }, action);
     }
 
     case 'PLAY_HAND': {
@@ -383,14 +411,31 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
       const played = c.selected
         .map((id) => byId.get(id))
         .filter((card): card is Card => card !== undefined);
+      const startingHands = state.baseCombat.hands + combatModifiers(state.relics, registry).hands;
+      const context: ScoreContext = {
+        gold: state.gold,
+        sanity: state.sanity,
+        isFirstHand: c.handsLeft === startingHands,
+        bossesDefeated: Math.max(0, state.umbral - 1),
+        cardsInHandNotPlayed: c.hand.length - c.selected.length,
+        xmultRelics: countXMultRelics(state.relics, registry),
+      };
       const result = scoreHand({
         played,
         handLevels: state.handLevels,
+        relics: toScoringRelics(state.relics, registry),
         corduraMultBonus: bonoMultCordura(state.sanity),
+        context,
       });
       const accumulated = c.accumulated + result.score;
       const gold = state.gold + result.coinsGained;
       const sanity = clamp(state.sanity + result.sanityDelta, 0, state.maxSanity);
+      const relics = applyScalersOnHandPlayed(
+        state.relics,
+        registry,
+        result.handType,
+        result.scoringIds.length,
+      );
       const node = state.map ? nodeById(state.map, state.map.currentNodeId) : undefined;
       const kind: ObjectiveKind = (node && objectiveKindOf(node.type)) || 'combate';
 
@@ -400,6 +445,7 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
         return commit(
           {
             ...state,
+            relics,
             gold: gold + reward,
             sanity,
             runScore: state.runScore + accumulated,
@@ -425,7 +471,7 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
           handsLeft,
           accumulated,
         };
-        return commit({ ...state, gold, sanity, combat }, action, result.events);
+        return commit({ ...state, relics, gold, sanity, combat }, action, result.events);
       }
 
       // LOSE: sin manos y sin alcanzar el objetivo -> apaga 1 vela (§9.5).
@@ -433,22 +479,22 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
       if (candles <= 0) {
         const lost = { status: 'lost' as const, depth: state.umbral, score: state.runScore };
         return commit(
-          { ...state, gold, sanity, candles: 0, combat: null, phase: 'fin', result: lost },
+          { ...state, relics, gold, sanity, candles: 0, combat: null, phase: 'fin', result: lost },
           action,
           result.events,
         );
       }
       // Jefe no vencido: hay que ganarlo, se re-reparte (reintento). Otros nodos: superado, al mapa.
       if (node?.type === 'jefe') {
-        const remade = makeCombatFor({ ...state, gold, sanity, candles }, node);
+        const remade = makeCombatFor({ ...state, relics, gold, sanity, candles }, node, registry);
         return commit(
-          { ...state, gold, sanity, candles, rng: remade.rng, combat: remade.combat },
+          { ...state, relics, gold, sanity, candles, rng: remade.rng, combat: remade.combat },
           action,
           result.events,
         );
       }
       return commit(
-        { ...state, gold, sanity, candles, combat: null, phase: 'mapa' },
+        { ...state, relics, gold, sanity, candles, combat: null, phase: 'mapa' },
         action,
         result.events,
       );
@@ -497,7 +543,7 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
       } else if (opt.kind === 'arcano' && next.consumables.length < next.consumableSlots) {
         next = { ...next, consumables: [...next.consumables, { defId: opt.id }] };
       }
-      return afterReward(next, action);
+      return afterReward(next, action, registry);
     }
 
     case 'SKIP_REWARD': {
@@ -505,7 +551,7 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
         return illegal(state, 'no hay recompensa');
       }
       const { pendingReward: _pendingReward, ...rest } = state;
-      return afterReward({ ...rest, gold: rest.gold + SKIP_REWARD_GOLD }, action);
+      return afterReward({ ...rest, gold: rest.gold + SKIP_REWARD_GOLD }, action, registry);
     }
 
     case 'REST_ACTION': {
@@ -557,18 +603,57 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
         case 'recompensa': {
           // NEXT en recompensa = saltar.
           const { pendingReward: _pendingReward, ...rest } = state;
-          return afterReward({ ...rest, gold: rest.gold + SKIP_REWARD_GOLD }, action);
+          return afterReward({ ...rest, gold: rest.gold + SKIP_REWARD_GOLD }, action, registry);
         }
         default:
           return illegal(state, 'nada que avanzar aqui');
       }
     }
 
-    // Tienda (compra/venta/reroll) y consumibles: contenido en el Bloque 10.
+    case 'USE_CONSUMABLE': {
+      if (state.phase === 'fin') return illegal(state, 'el run ha terminado');
+      const idx = state.consumables.findIndex((c) => c.defId === action.consumableId);
+      if (idx === -1) return illegal(state, 'no tienes ese consumible');
+      const def = registry.consumables[action.consumableId];
+      if (!def) return illegal(state, 'consumible desconocido');
+
+      let deck = state.deck;
+      let handLevels = state.handLevels;
+      if (def.applyEnhancement !== undefined || def.applySeal !== undefined) {
+        // Augurio: aplica mejora/sello a las cartas objetivo (en el mazo).
+        const max = def.maxTargets ?? 1;
+        const targets = new Set(action.targets.slice(0, max));
+        if (targets.size === 0) return illegal(state, 'el augurio necesita cartas objetivo');
+        deck = state.deck.map((card) =>
+          targets.has(card.id)
+            ? {
+                ...card,
+                ...(def.applyEnhancement !== undefined
+                  ? { enhancement: def.applyEnhancement }
+                  : {}),
+                ...(def.applySeal !== undefined ? { seal: def.applySeal } : {}),
+              }
+            : card,
+        );
+      } else if (def.levelUpHand) {
+        // Sello: sube +1 el nivel de un tipo de mano (o de todas).
+        if (def.levelUpHand === 'all') {
+          const all: Record<string, { level: number }> = {};
+          for (const [k, v] of Object.entries(state.handLevels)) all[k] = { level: v.level + 1 };
+          handLevels = all;
+        } else {
+          const cur = state.handLevels[def.levelUpHand] ?? { level: 1 };
+          handLevels = { ...state.handLevels, [def.levelUpHand]: { level: cur.level + 1 } };
+        }
+      }
+      const consumables = state.consumables.filter((_, i) => i !== idx);
+      return commit({ ...state, deck, handLevels, consumables }, action);
+    }
+
+    // Tienda (compra/venta/reroll): contenido en el Bloque 10.
     case 'BUY':
     case 'SELL_RELIC':
     case 'REROLL_SHOP':
-    case 'USE_CONSUMABLE':
       return illegal(state, `accion '${action.type}' aun no implementada (Bloque 10)`);
 
     default:
@@ -580,10 +665,13 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
  * Reproduce un action log desde cero (INV-4). El primer elemento DEBE ser START_RUN.
  * Reaplicar un log da un GameState identico (DoD del Bloque 2).
  */
-export function replay(actions: readonly GameAction[]): GameState {
+export function replay(
+  actions: readonly GameAction[],
+  registry: ContentRegistry = EMPTY_REGISTRY,
+): GameState {
   let state = createBlankState();
   for (const action of actions) {
-    state = reduce(state, action).state;
+    state = reduce(state, action, registry).state;
   }
   return state;
 }

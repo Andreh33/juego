@@ -1,35 +1,62 @@
-// Modelo de efectos declarativo MINIMO (semilla del DSL de §5.4).
-// El DSL completo (§22.5, ausente en la biblia) y el content registry llegan en el Bloque 5.
-// Aqui solo lo necesario para el motor de puntuacion y sus tests (reliquias de los tests de oro,
-// condicionales por palo/rango, y un condicional sobre el mult para probar el orden de reliquias).
-//
-// IMPORTANTE: efectos = DATA, no funciones arbitrarias (INV de §5.4, §24.8). El engine los
-// interpreta; el contenido (Bloque 5) solo aporta estos objetos.
+// DSL de efectos declarativo (§5.4, §22.5). Efectos = DATA, no funciones (INV §5.4, §24.8).
+// El engine interpreta; el contenido (packages/content) solo aporta estos objetos.
 import type { Rank, Suit } from '@umbral/shared';
+import type { HandType } from '../types';
 
+/** Condicion declarativa, evaluada contra el contexto de puntuacion. */
 export type Condition =
   | { type: 'always' }
+  // Por carta (onCardScored / retrigger):
   | { type: 'suit'; suit: Suit }
   | { type: 'rank'; rank: Rank }
   | { type: 'isFace' } // J/Q/K
   | { type: 'isAce' }
   | { type: 'hasEnhancement' }
-  | { type: 'multAtLeast'; value: number }; // condicional sobre el mult en curso (orden importa)
+  // Globales (onHandPlayed / xMult):
+  | { type: 'multAtLeast'; value: number }
+  | { type: 'handType'; any: HandType[] }
+  | { type: 'exactlyCards'; count: number }
+  | { type: 'atLeastCards'; count: number }
+  | { type: 'goldAtLeast'; value: number }
+  | { type: 'sanityBelow'; value: number }
+  | { type: 'firstHand' }
+  | { type: 'allFourSuits' }
+  | { type: 'handHasFigure' }
+  | { type: 'not'; cond: Condition };
+
+/** Conteos del contexto que escalan un efecto (efecto.n × conteo). */
+export type CountRef =
+  | 'playedCards'
+  | 'cardsInHandNotPlayed'
+  | 'figuresPlayed'
+  | 'acesPlayed'
+  | 'gold'
+  | 'xmultRelics'
+  | 'bossesDefeated';
 
 export type Effect =
-  | { kind: 'addFichas'; n: number; when?: Condition }
-  | { kind: 'addMult'; n: number; when?: Condition }
-  | { kind: 'xMult'; factor: number; when?: Condition };
+  | { kind: 'addFichas'; n: number; per?: CountRef; max?: number; when?: Condition }
+  | { kind: 'addMult'; n: number; per?: CountRef; max?: number; when?: Condition }
+  | { kind: 'xFichas'; factor: number; when?: Condition }
+  | { kind: 'xMult'; factor: number; perStep?: { per: CountRef; step: number }; when?: Condition };
 
-/** Aporte de puntuacion de una reliquia (subconjunto de los hooks de §5.4). */
-export interface RelicScoreDef {
+/** Contribucion de puntuacion de una reliquia (resuelta del RelicDef + estado de instancia). */
+export interface ScoringRelic {
   defId: string;
-  /** Efectos aditivos por cada carta puntuada (paso 3d). `when` puede mirar la carta. */
   onCardScored?: Effect[];
-  /** Efectos aditivos globales tras la mano (paso 4). */
   onHandPlayed?: Effect[];
-  /** Multiplicadores aplicados en el paso 5, en orden de reliquia. */
   xMult?: Effect[];
-  /** Re-disparos por carta: `times` extra cuando la carta cumple `when` (§7.6). */
   retrigger?: { when: Condition; times: number };
+}
+
+/** Contexto global del scoring (lo aporta reduce: §10.3, economia, etc.). */
+export interface ScoreContext {
+  gold: number;
+  sanity: number;
+  isFirstHand: boolean;
+  bossesDefeated: number;
+  /** Nº de cartas en mano que NO se jugaron (para Mano Abierta, etc.). */
+  cardsInHandNotPlayed: number;
+  /** Nº de reliquias con ×mult (para Convergencia, etc.). */
+  xmultRelics: number;
 }

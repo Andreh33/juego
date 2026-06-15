@@ -11,6 +11,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@umbral/engine": "workspace:*",
     "@umbral/shared": "workspace:*"
   },
   "devDependencies": {
