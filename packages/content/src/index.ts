@@ -29,6 +29,7 @@ export { BOSSES } from './bosses';
 export { CONSUMABLES } from './consumables';
 export { ELITES } from './elites';
 export { EVENTS } from './events';
+export * from './modes';
 export { GENERAL_RELICS } from './relics';
 export { VESSEL_RELICS } from './vessel-relics';
 export { VESSELS } from './vessels';

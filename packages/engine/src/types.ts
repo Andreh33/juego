@@ -129,6 +129,10 @@ export interface GameState {
   vessel: VesselId;
   veil: number;
   mode: RunMode;
+  /** Contexto de modo (para el marcador, §15): diario/semanal/desafio. */
+  dailyDate?: string;
+  weeklyId?: string;
+  challengeId?: string;
   rng: RngStreams;
   phase: RunPhase;
   umbral: number; // 1..8, 9+ = infinito

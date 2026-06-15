@@ -319,7 +319,8 @@ function afterReward(
   if (node?.type === 'jefe') {
     const relics = applyScalersOnBossDefeated(state.relics, registry);
     const gold = Math.floor(state.gold * umbralEndGoldFactor(state.relics, registry));
-    if (state.umbral >= 8) {
+    // Umbral 8 vencido: victoria, salvo en Modo Infinito que sigue descendiendo (§9.6).
+    if (state.umbral >= 8 && state.mode !== 'infinito') {
       const result = { status: 'won' as const, depth: state.umbral, score: state.runScore };
       return commit({ ...state, relics, gold, phase: 'fin', result }, action, events);
     }
@@ -353,7 +354,18 @@ export function startRun(
   const { seed, vessel, ruleset, modifiers } = action;
   const def = registry.vessels[vessel];
   const rng: RngStreams = createRngStreams(seed);
-  const deck = def ? buildVesselDeck(def) : buildStandardDeck();
+  let deck = def ? buildVesselDeck(def) : buildStandardDeck();
+  // Modo custom/desafio: recorte de mazo (Mazo Minimo, etc.).
+  if (modifiers?.deckSize && modifiers.deckSize < deck.length) {
+    const toRemove = deck.length - modifiers.deckSize;
+    const removeIds = new Set(
+      [...deck]
+        .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0))
+        .slice(0, toRemove)
+        .map((c) => c.id),
+    );
+    deck = deck.filter((c) => !removeIds.has(c.id));
+  }
   const candles = modifiers?.startingCandles ?? BASE_CANDLES;
   const sanity = modifiers?.startingSanity ?? BASE_SANITY;
   const baseCombat = {
@@ -369,7 +381,10 @@ export function startRun(
     seed,
     vessel,
     veil: 0,
-    mode: 'carrera',
+    mode: action.mode ?? 'carrera',
+    ...(action.dailyDate ? { dailyDate: action.dailyDate } : {}),
+    ...(action.weeklyId ? { weeklyId: action.weeklyId } : {}),
+    ...(action.challengeId ? { challengeId: action.challengeId } : {}),
     rng,
     phase: 'mapa',
     umbral: 1,
