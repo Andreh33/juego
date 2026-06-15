@@ -56,6 +56,8 @@ export interface MapNode {
   row: number;
   next: string[];
   visited: boolean;
+  /** Objetivo de puntuacion (combate/elite/jefe), fijado al generar el mapa (§9.3). */
+  objective?: number;
 }
 
 export interface UmbralMap {
@@ -134,6 +136,10 @@ export interface GameState {
   sanity: number; // 0..100
   maxSanity: number;
   gold: number;
+  /** Puntuacion total acumulada del run (suma de combates ganados; para el marcador, §15). */
+  runScore: number;
+  /** Recursos base por combate (defaults + modificadores; los vales/Recipiente los suben). */
+  baseCombat: { hands: number; discards: number; handSize: number };
   deck: Card[];
   /** ORDEN importa (§7.3). */
   relics: RelicInstance[];

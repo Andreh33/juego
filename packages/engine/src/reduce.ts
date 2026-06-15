@@ -4,10 +4,17 @@
 // El action log = acciones aplicadas (sin TICK). Cada accion valida su legalidad; una accion
 // ilegal devuelve el estado SIN cambios + un FeelEvent de error (no se registra en el log).
 //
-// Bloque 2 = ESQUELETO: transiciona fases y mecaniza el combate (seleccionar/jugar/descartar)
-// SIN scoring (Bloque 3) y SIN mapa real (Bloque 4). Un START_RUN abre directamente un combate
-// provisional para tener una superficie manipulable y determinista.
-import { type Card, createRngStreams, type RngStreams, shuffle } from '@umbral/shared';
+// Bloque 4: estructura de run completa. START_RUN genera el mapa del Umbral 1 (§9.2). El flujo
+// es mapa -> elegir nodo -> combate (con scoring, velas y Cordura) / nodos de servicio ->
+// recompensa -> avance de Umbral -> victoria (Umbral 8) o muerte (0 velas). Tienda/eventos/
+// santuarios son placeholders jugables (su contenido llega en Bloques 10/12).
+import {
+  type Card,
+  cloneRngState,
+  createRngStreams,
+  type RngStreams,
+  shuffle,
+} from '@umbral/shared';
 import type { GameAction, StartRunAction } from './actions';
 import { buildStandardDeck } from './deck';
 import {
@@ -20,18 +27,24 @@ import {
   BASE_RELIC_SLOTS,
   BASE_SANITY,
   MAX_SELECTED,
-  PLACEHOLDER_OBJECTIVE,
 } from './defaults';
 import type { FeelEvent } from './events';
 import { CURRENT_SCHEMA_VERSION } from './migrations';
+import { bonoMultCordura, bossObjectiveFactor } from './run/cordura';
+import { combatGoldReward, interest, SKIP_REWARD_GOLD } from './run/economy';
+import { generateUmbralMap } from './run/map';
+import type { ObjectiveKind } from './run/objectives';
+import { generateReward } from './run/reward';
 import { scoreHand } from './scoring/score';
 import {
   type CombatState,
   type GameState,
   type HandLevel,
+  type MapNode,
   type ReduceResult,
   type RelicInstance,
   STANDARD_HAND_TYPES,
+  type UmbralMap,
 } from './types';
 
 // ---- Helpers internos ----
@@ -43,6 +56,10 @@ function illegal(state: GameState, reason: string): ReduceResult {
 /** Aplica una accion: anade al log y devuelve el resultado. `next` ya trae los cambios de estado. */
 function commit(next: GameState, action: GameAction, events: FeelEvent[] = []): ReduceResult {
   return { state: { ...next, log: [...next.log, action] }, events };
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 function sameMultiset(a: readonly string[], b: readonly string[]): boolean {
@@ -57,7 +74,7 @@ function sameMultiset(a: readonly string[], b: readonly string[]): boolean {
   return true;
 }
 
-/** Repone la mano hasta handSize tomando del frente del drawPile (§7.2). Sin rng en Bloque 2. */
+/** Repone la mano hasta handSize tomando del frente del drawPile (§7.2). */
 function refill(
   hand: readonly string[],
   drawPile: readonly string[],
@@ -75,37 +92,113 @@ function initialHandLevels(): Record<string, HandLevel> {
   return levels;
 }
 
+function simaForUmbral(umbral: number): 1 | 2 | 3 | 4 {
+  if (umbral <= 3) return 1;
+  if (umbral <= 6) return 2;
+  if (umbral <= 8) return 3;
+  return 4;
+}
+
+function nodeById(map: UmbralMap, id: string | null): MapNode | undefined {
+  if (id === null) return undefined;
+  return map.nodes.find((n) => n.id === id);
+}
+
+/** Nodos accesibles desde la posicion actual (fila 0 si no se ha elegido nada). */
+export function reachableNodes(map: UmbralMap): MapNode[] {
+  if (map.currentNodeId === null) return map.nodes.filter((n) => n.row === 0);
+  const cur = nodeById(map, map.currentNodeId);
+  if (!cur) return [];
+  return cur.next.map((id) => nodeById(map, id)).filter((n): n is MapNode => n !== undefined);
+}
+
+function objectiveKindOf(type: MapNode['type']): ObjectiveKind | null {
+  return type === 'combate' || type === 'elite' || type === 'jefe' ? type : null;
+}
+
+/** Reparte un combate clonando el stream de reparto (pureza). */
+function dealHand(
+  rng: RngStreams,
+  deckIds: readonly string[],
+  handSize: number,
+): { rng: RngStreams; hand: string[]; drawPile: string[] } {
+  const deal = cloneRngState(rng.deal);
+  const shuffled = shuffle(deal, deckIds);
+  return {
+    rng: { ...rng, deal },
+    hand: shuffled.slice(0, handSize),
+    drawPile: shuffled.slice(handSize),
+  };
+}
+
+/** Crea el CombatState para un nodo de combate/elite/jefe (objetivo + reparto). */
+function makeCombatFor(state: GameState, node: MapNode): { rng: RngStreams; combat: CombatState } {
+  const dealt = dealHand(
+    state.rng,
+    state.deck.map((c) => c.id),
+    state.baseCombat.handSize,
+  );
+  let objective = node.objective ?? 0;
+  if (node.type === 'jefe') objective = Math.round(objective * bossObjectiveFactor(state.sanity));
+  const combat: CombatState = {
+    objective,
+    accumulated: 0,
+    handsLeft: state.baseCombat.hands,
+    discardsLeft: state.baseCombat.discards,
+    handSize: state.baseCombat.handSize,
+    hand: dealt.hand,
+    selected: [],
+    drawPile: dealt.drawPile,
+    ...(node.type === 'jefe'
+      ? { bossId: `boss.${node.id}` }
+      : node.type === 'elite'
+        ? { bossId: `elite.${node.id}` }
+        : {}),
+  };
+  return { rng: dealt.rng, combat };
+}
+
+/** Tras resolver una recompensa: avanzar de Umbral si el nodo era el Jefe, o volver al mapa. */
+function afterReward(state: GameState, action: GameAction, events: FeelEvent[] = []): ReduceResult {
+  const node = state.map ? nodeById(state.map, state.map.currentNodeId) : undefined;
+  if (node?.type === 'jefe') {
+    if (state.umbral >= 8) {
+      const result = { status: 'won' as const, depth: state.umbral, score: state.runScore };
+      return commit({ ...state, phase: 'fin', result }, action, events);
+    }
+    const mapRng = cloneRngState(state.rng.map);
+    const nextUmbral = state.umbral + 1;
+    const map = generateUmbralMap(nextUmbral, mapRng);
+    return commit(
+      {
+        ...state,
+        rng: { ...state.rng, map: mapRng },
+        umbral: nextUmbral,
+        sima: simaForUmbral(nextUmbral),
+        phase: 'mapa',
+        map,
+      },
+      action,
+      events,
+    );
+  }
+  return commit({ ...state, phase: 'mapa' }, action, events);
+}
+
 // ---- Constructor de run (START_RUN) ----
 
-/** Construye el GameState inicial de un run y abre el primer combate (placeholder, Bloque 2). */
 export function startRun(action: StartRunAction): GameState {
   const { seed, vessel, ruleset, modifiers } = action;
   const rng: RngStreams = createRngStreams(seed);
-
   const deck = buildStandardDeck();
-  const handSize = modifiers?.handSize ?? BASE_HAND_SIZE;
-
-  // Baraja inicial determinista con el stream de reparto.
-  const shuffled = shuffle(
-    rng.deal,
-    deck.map((c) => c.id),
-  );
-  const hand = shuffled.slice(0, handSize);
-  const drawPile = shuffled.slice(handSize);
-
-  const combat: CombatState = {
-    objective: PLACEHOLDER_OBJECTIVE,
-    accumulated: 0,
-    handsLeft: modifiers?.hands ?? BASE_HANDS,
-    discardsLeft: modifiers?.discards ?? BASE_DISCARDS,
-    handSize,
-    hand,
-    selected: [],
-    drawPile,
-  };
-
   const candles = modifiers?.startingCandles ?? BASE_CANDLES;
   const sanity = modifiers?.startingSanity ?? BASE_SANITY;
+  const baseCombat = {
+    hands: modifiers?.hands ?? BASE_HANDS,
+    discards: modifiers?.discards ?? BASE_DISCARDS,
+    handSize: modifiers?.handSize ?? BASE_HAND_SIZE,
+  };
+  const map = generateUmbralMap(1, rng.map); // muta rng.map (fresco)
 
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -115,7 +208,7 @@ export function startRun(action: StartRunAction): GameState {
     veil: 0,
     mode: 'carrera',
     rng,
-    phase: 'combate',
+    phase: 'mapa',
     umbral: 1,
     sima: 1,
     candles,
@@ -123,6 +216,7 @@ export function startRun(action: StartRunAction): GameState {
     sanity,
     maxSanity: sanity,
     gold: modifiers?.startingGold ?? BASE_GOLD,
+    baseCombat,
     deck,
     relics: [],
     relicSlots: BASE_RELIC_SLOTS,
@@ -130,13 +224,14 @@ export function startRun(action: StartRunAction): GameState {
     consumableSlots: BASE_CONSUMABLE_SLOTS,
     handLevels: initialHandLevels(),
     vouchers: [],
-    map: null,
-    combat,
+    runScore: 0,
+    map,
+    combat: null,
     log: [action],
   };
 }
 
-/** Estado vacio (sin run activo). Sirve de punto de partida para reproducir un log (replay). */
+/** Estado vacio (sin run activo). Punto de partida para reproducir un log (replay). */
 export function createBlankState(): GameState {
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -154,6 +249,7 @@ export function createBlankState(): GameState {
     sanity: 0,
     maxSanity: 0,
     gold: 0,
+    baseCombat: { hands: BASE_HANDS, discards: BASE_DISCARDS, handSize: BASE_HAND_SIZE },
     deck: [],
     relics: [],
     relicSlots: 0,
@@ -161,6 +257,7 @@ export function createBlankState(): GameState {
     consumableSlots: 0,
     handLevels: {},
     vouchers: [],
+    runScore: 0,
     map: null,
     combat: null,
     log: [],
@@ -169,29 +266,77 @@ export function createBlankState(): GameState {
 
 // ---- Reductor ----
 
+function combatGuard(state: GameState): CombatState | null {
+  return state.phase === 'combate' && state.combat ? state.combat : null;
+}
+
 export function reduce(state: GameState, action: GameAction): ReduceResult {
   switch (action.type) {
-    // TICK: solo timers cosmeticos. No cambia estado ni va al log (§5.2).
     case 'TICK':
       return { state, events: [] };
 
-    // START_RUN reconstruye un run nuevo (ignora el estado previo: resetea).
     case 'START_RUN':
       return { state: startRun(action), events: [] };
 
+    case 'CHOOSE_NODE': {
+      if (state.phase !== 'mapa' || !state.map) return illegal(state, 'no estas en el mapa');
+      const node = reachableNodes(state.map).find((n) => n.id === action.nodeId);
+      if (!node) return illegal(state, 'nodo no accesible');
+      const map: UmbralMap = {
+        ...state.map,
+        currentNodeId: node.id,
+        nodes: state.map.nodes.map((n) => (n.id === node.id ? { ...n, visited: true } : n)),
+      };
+
+      if (objectiveKindOf(node.type)) {
+        const { rng, combat } = makeCombatFor({ ...state, map }, node);
+        return commit({ ...state, map, rng, phase: 'combate', combat }, action);
+      }
+      switch (node.type) {
+        case 'tienda':
+          return commit(
+            {
+              ...state,
+              map,
+              phase: 'tienda',
+              shop: { items: [], rerollCost: 5, rerollsThisVisit: 0 },
+            },
+            action,
+          );
+        case 'evento':
+          return commit(
+            { ...state, map, phase: 'evento', pendingEvent: { eventId: 'evento.placeholder' } },
+            action,
+          );
+        case 'tesoro':
+          return commit(
+            { ...state, map, phase: 'recompensa', pendingReward: generateReward('combate') },
+            action,
+          );
+        case 'descanso':
+          return commit({ ...state, map, phase: 'descanso' }, action);
+        case 'santuario':
+          return commit({ ...state, map, phase: 'santuario' }, action);
+        default:
+          return illegal(state, 'tipo de nodo desconocido');
+      }
+    }
+
     case 'SELECT_CARD': {
-      if (state.phase !== 'combate' || !state.combat) return illegal(state, 'no estas en combate');
-      const c = state.combat;
+      const c = combatGuard(state);
+      if (!c) return illegal(state, 'no estas en combate');
       if (!c.hand.includes(action.cardId)) return illegal(state, 'la carta no esta en tu mano');
       if (c.selected.includes(action.cardId)) return illegal(state, 'carta ya seleccionada');
       if (c.selected.length >= MAX_SELECTED) return illegal(state, `maximo ${MAX_SELECTED} cartas`);
-      const combat: CombatState = { ...c, selected: [...c.selected, action.cardId] };
-      return commit({ ...state, combat }, action);
+      return commit(
+        { ...state, combat: { ...c, selected: [...c.selected, action.cardId] } },
+        action,
+      );
     }
 
     case 'DESELECT_CARD': {
-      if (state.phase !== 'combate' || !state.combat) return illegal(state, 'no estas en combate');
-      const c = state.combat;
+      const c = combatGuard(state);
+      if (!c) return illegal(state, 'no estas en combate');
       if (!c.selected.includes(action.cardId))
         return illegal(state, 'la carta no esta seleccionada');
       const combat: CombatState = {
@@ -202,18 +347,17 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
     }
 
     case 'REORDER_HAND': {
-      if (state.phase !== 'combate' || !state.combat) return illegal(state, 'no estas en combate');
-      const c = state.combat;
+      const c = combatGuard(state);
+      if (!c) return illegal(state, 'no estas en combate');
       if (!sameMultiset(action.order, c.hand)) {
         return illegal(state, 'el orden no es una permutacion de la mano');
       }
-      const combat: CombatState = { ...c, hand: [...action.order] };
-      return commit({ ...state, combat }, action);
+      return commit({ ...state, combat: { ...c, hand: [...action.order] } }, action);
     }
 
     case 'DISCARD': {
-      if (state.phase !== 'combate' || !state.combat) return illegal(state, 'no estas en combate');
-      const c = state.combat;
+      const c = combatGuard(state);
+      if (!c) return illegal(state, 'no estas en combate');
       if (c.discardsLeft <= 0) return illegal(state, 'sin descartes');
       if (c.selected.length === 0) return illegal(state, 'no hay cartas seleccionadas');
       const kept = c.hand.filter((id) => !c.selected.includes(id));
@@ -229,51 +373,99 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
     }
 
     case 'PLAY_HAND': {
-      if (state.phase !== 'combate' || !state.combat) return illegal(state, 'no estas en combate');
-      const c = state.combat;
+      const c = combatGuard(state);
+      if (!c) return illegal(state, 'no estas en combate');
       if (c.handsLeft <= 0) return illegal(state, 'sin manos');
       if (c.selected.length < 1 || c.selected.length > MAX_SELECTED) {
         return illegal(state, `selecciona entre 1 y ${MAX_SELECTED} cartas`);
       }
-      // Puntuacion (§7.3). Las reliquias se resuelven contra el content registry en el Bloque 5;
-      // aqui el run aun no tiene ninguna, asi que se puntua sin ellas. El win/lose (velas,
-      // objetivo cumplido -> siguiente fase) entra en el Bloque 4.
       const byId = new Map<string, Card>(state.deck.map((card) => [card.id, card]));
       const played = c.selected
         .map((id) => byId.get(id))
         .filter((card): card is Card => card !== undefined);
-      const result = scoreHand({ played, handLevels: state.handLevels });
-
-      const kept = c.hand.filter((id) => !c.selected.includes(id));
-      const { hand, drawPile } = refill(kept, c.drawPile, c.handSize);
-      const combat: CombatState = {
-        ...c,
-        hand,
-        drawPile,
-        selected: [],
-        handsLeft: c.handsLeft - 1,
-        accumulated: c.accumulated + result.score,
-      };
+      const result = scoreHand({
+        played,
+        handLevels: state.handLevels,
+        corduraMultBonus: bonoMultCordura(state.sanity),
+      });
+      const accumulated = c.accumulated + result.score;
       const gold = state.gold + result.coinsGained;
-      const sanity = Math.max(0, Math.min(state.maxSanity, state.sanity + result.sanityDelta));
-      return commit({ ...state, combat, gold, sanity }, action, result.events);
+      const sanity = clamp(state.sanity + result.sanityDelta, 0, state.maxSanity);
+      const node = state.map ? nodeById(state.map, state.map.currentNodeId) : undefined;
+      const kind: ObjectiveKind = (node && objectiveKindOf(node.type)) || 'combate';
+
+      // WIN: objetivo alcanzado.
+      if (accumulated >= c.objective) {
+        const reward = combatGoldReward(kind) + interest(gold);
+        return commit(
+          {
+            ...state,
+            gold: gold + reward,
+            sanity,
+            runScore: state.runScore + accumulated,
+            combat: null,
+            phase: 'recompensa',
+            pendingReward: generateReward(kind),
+          },
+          action,
+          result.events,
+        );
+      }
+
+      // Sigue habiendo manos: continuar.
+      const handsLeft = c.handsLeft - 1;
+      if (handsLeft > 0) {
+        const kept = c.hand.filter((id) => !c.selected.includes(id));
+        const refilled = refill(kept, c.drawPile, c.handSize);
+        const combat: CombatState = {
+          ...c,
+          hand: refilled.hand,
+          drawPile: refilled.drawPile,
+          selected: [],
+          handsLeft,
+          accumulated,
+        };
+        return commit({ ...state, gold, sanity, combat }, action, result.events);
+      }
+
+      // LOSE: sin manos y sin alcanzar el objetivo -> apaga 1 vela (§9.5).
+      const candles = state.candles - 1;
+      if (candles <= 0) {
+        const lost = { status: 'lost' as const, depth: state.umbral, score: state.runScore };
+        return commit(
+          { ...state, gold, sanity, candles: 0, combat: null, phase: 'fin', result: lost },
+          action,
+          result.events,
+        );
+      }
+      // Jefe no vencido: hay que ganarlo, se re-reparte (reintento). Otros nodos: superado, al mapa.
+      if (node?.type === 'jefe') {
+        const remade = makeCombatFor({ ...state, gold, sanity, candles }, node);
+        return commit(
+          { ...state, gold, sanity, candles, rng: remade.rng, combat: remade.combat },
+          action,
+          result.events,
+        );
+      }
+      return commit(
+        { ...state, gold, sanity, candles, combat: null, phase: 'mapa' },
+        action,
+        result.events,
+      );
     }
 
     case 'SCRY_BURY': {
-      if (state.phase !== 'combate' || !state.combat) return illegal(state, 'no estas en combate');
-      const c = state.combat;
+      const c = combatGuard(state);
+      if (!c) return illegal(state, 'no estas en combate');
       if (!c.drawPile.includes(action.cardId)) return illegal(state, 'la carta no esta en el mazo');
       const drawPile = [...c.drawPile.filter((id) => id !== action.cardId), action.cardId];
-      const combat: CombatState = { ...c, drawPile };
-      return commit({ ...state, combat }, action);
+      return commit({ ...state, combat: { ...c, drawPile } }, action);
     }
 
     case 'SCRY_KEEP': {
-      if (state.phase !== 'combate' || !state.combat) return illegal(state, 'no estas en combate');
-      if (!state.combat.drawPile.includes(action.cardId)) {
-        return illegal(state, 'la carta no esta en el mazo');
-      }
-      // No-op deterministico: marca la carta como conservada (sin reordenar). Vidente lo usa en Bloque 8.
+      const c = combatGuard(state);
+      if (!c) return illegal(state, 'no estas en combate');
+      if (!c.drawPile.includes(action.cardId)) return illegal(state, 'la carta no esta en el mazo');
       return commit({ ...state }, action);
     }
 
@@ -290,19 +482,94 @@ export function reduce(state: GameState, action: GameAction): ReduceResult {
       return commit({ ...state, relics }, action);
     }
 
-    // Acciones de fases aun no implementadas en este bloque (mapa/tienda/evento/recompensa/
-    // descanso/jefe -> Bloques 4, 9, 10, 12). Se validan como ilegales con motivo claro.
+    case 'PICK_REWARD': {
+      if (state.phase !== 'recompensa' || !state.pendingReward) {
+        return illegal(state, 'no hay recompensa');
+      }
+      const opt = state.pendingReward.options.find((o) => o.id === action.rewardId);
+      if (!opt) return illegal(state, 'opcion de recompensa no valida');
+      const { pendingReward: _pendingReward, ...rest } = state;
+      let next: GameState = rest;
+      if (opt.kind === 'skip') {
+        next = { ...next, gold: next.gold + SKIP_REWARD_GOLD };
+      } else if (opt.kind === 'relic' && next.relics.length < next.relicSlots) {
+        next = { ...next, relics: [...next.relics, { defId: opt.id }] };
+      } else if (opt.kind === 'arcano' && next.consumables.length < next.consumableSlots) {
+        next = { ...next, consumables: [...next.consumables, { defId: opt.id }] };
+      }
+      return afterReward(next, action);
+    }
+
+    case 'SKIP_REWARD': {
+      if (state.phase !== 'recompensa' || !state.pendingReward) {
+        return illegal(state, 'no hay recompensa');
+      }
+      const { pendingReward: _pendingReward, ...rest } = state;
+      return afterReward({ ...rest, gold: rest.gold + SKIP_REWARD_GOLD }, action);
+    }
+
+    case 'REST_ACTION': {
+      if (state.phase !== 'descanso') return illegal(state, 'no estas en un descanso');
+      if (action.kind === 'heal') {
+        return commit(
+          {
+            ...state,
+            candles: Math.min(state.maxCandles, state.candles + 1),
+            sanity: Math.min(state.maxSanity, state.sanity + 10),
+            phase: 'mapa',
+          },
+          action,
+        );
+      }
+      if (action.kind === 'upgrade') {
+        const target = action.target ?? 'carta_alta';
+        const cur = state.handLevels[target] ?? { level: 1 };
+        const handLevels = { ...state.handLevels, [target]: { level: cur.level + 1 } };
+        return commit({ ...state, handLevels, phase: 'mapa' }, action);
+      }
+      if (action.kind === 'remove' && action.target) {
+        const deck = state.deck.filter((c) => c.id !== action.target);
+        return commit({ ...state, deck, phase: 'mapa' }, action);
+      }
+      return illegal(state, 'accion de descanso invalida');
+    }
+
+    case 'RESOLVE_EVENT': {
+      if (state.phase !== 'evento' || !state.pendingEvent) return illegal(state, 'no hay evento');
+      // Contenido real de eventos en el Bloque 12; por ahora resolver = volver al mapa.
+      const { pendingEvent: _pendingEvent, ...rest } = state;
+      return commit({ ...rest, phase: 'mapa' }, action);
+    }
+
+    case 'NEXT': {
+      switch (state.phase) {
+        case 'descanso':
+        case 'santuario':
+          return commit({ ...state, phase: 'mapa' }, action);
+        case 'tienda': {
+          const { shop: _shop, ...rest } = state;
+          return commit({ ...rest, phase: 'mapa' }, action);
+        }
+        case 'evento': {
+          const { pendingEvent: _pendingEvent, ...rest } = state;
+          return commit({ ...rest, phase: 'mapa' }, action);
+        }
+        case 'recompensa': {
+          // NEXT en recompensa = saltar.
+          const { pendingReward: _pendingReward, ...rest } = state;
+          return afterReward({ ...rest, gold: rest.gold + SKIP_REWARD_GOLD }, action);
+        }
+        default:
+          return illegal(state, 'nada que avanzar aqui');
+      }
+    }
+
+    // Tienda (compra/venta/reroll) y consumibles: contenido en el Bloque 10.
     case 'BUY':
     case 'SELL_RELIC':
     case 'REROLL_SHOP':
     case 'USE_CONSUMABLE':
-    case 'CHOOSE_NODE':
-    case 'RESOLVE_EVENT':
-    case 'PICK_REWARD':
-    case 'SKIP_REWARD':
-    case 'REST_ACTION':
-    case 'NEXT':
-      return illegal(state, `accion '${action.type}' aun no implementada (bloque posterior)`);
+      return illegal(state, `accion '${action.type}' aun no implementada (Bloque 10)`);
 
     default:
       return illegal(state, 'accion desconocida');
