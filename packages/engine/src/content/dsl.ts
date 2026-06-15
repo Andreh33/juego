@@ -60,14 +60,61 @@ export interface ConsumableDef {
   applySeal?: Seal;
   /** Augurio: maximo de cartas objetivo. */
   maxTargets?: number;
+  /** Augurio: +/- rango a las cartas objetivo (Ascenso/Descenso). */
+  rankDelta?: number;
+  /** Augurio: destruye las cartas objetivo (Vacio). */
+  destroyTargets?: boolean;
+  /** Augurio: duplica las cartas objetivo (Doble). */
+  duplicateTargets?: boolean;
+  /** Augurio: iguala el palo de los objetivos al del primero (Cambio). */
+  changeSuitToFirst?: boolean;
+  /** Augurio: iguala el rango de los objetivos al del primero (Igualar/Carne). */
+  matchRankToFirst?: boolean;
   /** Sello: sube +1 el nivel de un tipo de mano (o 'all'). */
   levelUpHand?: HandType | 'all';
+  /** Conjuro: delta de Cordura al usarlo. */
+  sanityDelta?: number;
+  /** Conjuro: pone la Cordura a 0 (Abismo). */
+  sanityToZero?: boolean;
+  /** Conjuro: destruye N cartas aleatorias del mazo (Doble Filo). */
+  destroyRandomDeck?: number;
+  /** Conjuro: otorga una reliquia aleatoria de esta rareza (Doble Filo, Abismo). */
+  gainRandomRelicRarity?: Rarity;
+}
+
+/** Vale: mejora PERMANENTE del run (no ocupa slot, §11.5). */
+export interface VoucherDef {
+  id: string;
+  name: string;
+  cost: number;
+  flavor: string;
+  effect: {
+    relicSlots?: number;
+    consumableSlots?: number;
+    maxCandles?: number;
+    maxSanity?: number;
+    hands?: number;
+    discards?: number;
+    handSize?: number;
+    /** Descuento de reroll (resta al coste). */
+    rerollDiscount?: number;
+    /** Descuento de tienda (0..1, p.ej. 0.15 = -15%). */
+    shopDiscount?: number;
+    /** Flags para sistemas posteriores (suerte/abundancia/fortuna/vidente/profundidad). */
+    flags?: string[];
+  };
 }
 
 export interface ContentRegistry {
   relics: Record<string, RelicDef>;
   consumables: Record<string, ConsumableDef>;
   vessels: Record<string, VesselDef>;
+  vouchers: Record<string, VoucherDef>;
 }
 
-export const EMPTY_REGISTRY: ContentRegistry = { relics: {}, consumables: {}, vessels: {} };
+export const EMPTY_REGISTRY: ContentRegistry = {
+  relics: {},
+  consumables: {},
+  vessels: {},
+  vouchers: {},
+};

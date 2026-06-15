@@ -12,6 +12,8 @@ import {
   type Card,
   cloneRngState,
   createRngStreams,
+  nextInt,
+  type Rank,
   type RngStreams,
   shuffle,
 } from '@umbral/shared';
@@ -31,8 +33,10 @@ import {
   scoringModifiers,
   toScoringRelics,
   umbralEndGoldFactor,
+  voucherStatEffect,
 } from './content/interpret';
 import { pickRelicRewards } from './content/pool';
+import { generateShop, voucherShopMods } from './content/shop';
 import type { VesselDef } from './content/vessel';
 import { buildStandardDeck, buildVesselDeck } from './deck';
 import {
@@ -411,16 +415,22 @@ export function reduce(
         return commit({ ...base, rng, phase: 'combate', combat }, action);
       }
       switch (node.type) {
-        case 'tienda':
+        case 'tienda': {
+          const sm = voucherShopMods(state.vouchers, registry);
+          const shopRng = cloneRngState(state.rng.shop);
+          const shop = generateShop(registry, shopRng, {
+            sima: state.sima,
+            ownedRelicIds: new Set(state.relics.map((r) => r.defId)),
+            ownedVoucherIds: new Set(state.vouchers),
+            shopDiscount: sm.shopDiscount,
+            rerollDiscount: sm.rerollDiscount,
+            extraItems: sm.extraItems,
+          });
           return commit(
-            {
-              ...state,
-              map,
-              phase: 'tienda',
-              shop: { items: [], rerollCost: 5, rerollsThisVisit: 0 },
-            },
+            { ...state, map, rng: { ...state.rng, shop: shopRng }, phase: 'tienda', shop },
             action,
           );
+        }
         case 'evento':
           return commit(
             { ...state, map, phase: 'evento', pendingEvent: { eventId: 'evento.placeholder' } },
@@ -787,45 +797,175 @@ export function reduce(
 
       let deck = state.deck;
       let handLevels = state.handLevels;
+      let sanity = state.sanity;
+      let rng = state.rng;
+      let relics = state.relics;
       let enhancedCount = 0;
-      if (def.applyEnhancement !== undefined || def.applySeal !== undefined) {
-        // Augurio: aplica mejora/sello a las cartas objetivo (en el mazo).
-        const max = def.maxTargets ?? 1;
-        const targets = new Set(action.targets.slice(0, max));
-        if (targets.size === 0) return illegal(state, 'el augurio necesita cartas objetivo');
-        if (def.applyEnhancement !== undefined) enhancedCount = targets.size;
-        deck = state.deck.map((card) =>
-          targets.has(card.id)
-            ? {
-                ...card,
-                ...(def.applyEnhancement !== undefined
-                  ? { enhancement: def.applyEnhancement }
-                  : {}),
-                ...(def.applySeal !== undefined ? { seal: def.applySeal } : {}),
-              }
-            : card,
-        );
+      const max = def.maxTargets ?? 3;
+      const targets = new Set(action.targets.slice(0, max));
+      const firstTargetId = action.targets[0];
+      const cardOf = (id: string | undefined) =>
+        id ? state.deck.find((c) => c.id === id) : undefined;
+
+      const needsTargets =
+        def.applyEnhancement !== undefined ||
+        def.applySeal !== undefined ||
+        def.rankDelta !== undefined ||
+        def.destroyTargets ||
+        def.duplicateTargets ||
+        def.changeSuitToFirst ||
+        def.matchRankToFirst;
+      if (needsTargets && targets.size === 0)
+        return illegal(state, 'el augurio necesita objetivos');
+
+      const refSuit = def.changeSuitToFirst ? cardOf(firstTargetId)?.suit : undefined;
+      const refRank = def.matchRankToFirst ? cardOf(firstTargetId)?.rank : undefined;
+      if (def.applyEnhancement !== undefined) enhancedCount = targets.size;
+
+      deck = state.deck.map((card) => {
+        if (!targets.has(card.id)) return card;
+        let c = card;
+        if (def.applyEnhancement !== undefined) c = { ...c, enhancement: def.applyEnhancement };
+        if (def.applySeal !== undefined) c = { ...c, seal: def.applySeal };
+        if (def.rankDelta !== undefined && c.rank !== null) {
+          c = { ...c, rank: Math.max(2, Math.min(14, c.rank + def.rankDelta)) as Rank };
+        }
+        if (refSuit !== undefined) c = { ...c, suit: refSuit };
+        if (refRank !== undefined && refRank !== null) c = { ...c, rank: refRank };
+        return c;
+      });
+      if (def.duplicateTargets) {
+        const dups = deck
+          .filter((card) => targets.has(card.id))
+          .map((card, i) => ({ ...card, id: `${card.id}__dup${state.deck.length + i}` }));
+        deck = [...deck, ...dups];
+      }
+      if (def.destroyTargets) deck = deck.filter((card) => !targets.has(card.id));
+
+      if (def.levelUpHand === 'all') {
+        const all: Record<string, { level: number }> = {};
+        for (const [k, v] of Object.entries(state.handLevels)) all[k] = { level: v.level + 1 };
+        handLevels = all;
       } else if (def.levelUpHand) {
-        // Sello: sube +1 el nivel de un tipo de mano (o de todas).
-        if (def.levelUpHand === 'all') {
-          const all: Record<string, { level: number }> = {};
-          for (const [k, v] of Object.entries(state.handLevels)) all[k] = { level: v.level + 1 };
-          handLevels = all;
-        } else {
-          const cur = state.handLevels[def.levelUpHand] ?? { level: 1 };
-          handLevels = { ...state.handLevels, [def.levelUpHand]: { level: cur.level + 1 } };
+        const cur = state.handLevels[def.levelUpHand] ?? { level: 1 };
+        handLevels = { ...state.handLevels, [def.levelUpHand]: { level: cur.level + 1 } };
+      }
+
+      // Conjuros
+      if (def.sanityToZero) sanity = 0;
+      else if (def.sanityDelta) sanity = clamp(sanity + def.sanityDelta, 0, state.maxSanity);
+      if (def.destroyRandomDeck) {
+        const d = destroyRandomFromDeck(rng, deck, def.destroyRandomDeck);
+        deck = d.deck;
+        rng = d.rng;
+      }
+      if (def.gainRandomRelicRarity && relics.length < state.relicSlots) {
+        const owned = new Set(relics.map((r) => r.defId));
+        const candidates = Object.values(registry.relics).filter(
+          (r) => r.rarity === def.gainRandomRelicRarity && !r.vessel && !owned.has(r.id),
+        );
+        if (candidates.length > 0) {
+          const reward = cloneRngState(rng.reward);
+          const pick = candidates[nextInt(reward, 0, candidates.length - 1)];
+          rng = { ...rng, reward };
+          if (pick) relics = [...relics, { defId: pick.id }];
         }
       }
+
       const consumables = state.consumables.filter((_, i) => i !== idx);
-      const relics = applyScalersOnEnhanced(state.relics, registry, enhancedCount);
-      return commit({ ...state, deck, handLevels, consumables, relics }, action);
+      relics = applyScalersOnEnhanced(relics, registry, enhancedCount);
+      return commit({ ...state, deck, handLevels, sanity, rng, consumables, relics }, action);
     }
 
-    // Tienda (compra/venta/reroll): contenido en el Bloque 10.
-    case 'BUY':
-    case 'SELL_RELIC':
-    case 'REROLL_SHOP':
-      return illegal(state, `accion '${action.type}' aun no implementada (Bloque 10)`);
+    case 'BUY': {
+      if (state.phase !== 'tienda' || !state.shop) return illegal(state, 'no estas en la tienda');
+      const item = state.shop.items.find((i) => i.id === action.shopItemId);
+      if (!item) return illegal(state, 'articulo no disponible');
+      if (state.gold < item.cost) return illegal(state, 'oro insuficiente');
+      let next: GameState = { ...state, gold: state.gold - item.cost };
+      if (item.kind === 'relic') {
+        if (next.relics.length >= next.relicSlots) return illegal(state, 'sin slots de reliquia');
+        const acq = acquireEffect(item.payloadId, registry);
+        const maxCandles = Math.max(1, next.maxCandles + acq.maxCandlesDelta);
+        next = {
+          ...next,
+          relics: [...next.relics, { defId: item.payloadId }],
+          maxCandles,
+          candles: Math.min(next.candles, maxCandles),
+          sanity: clamp(next.sanity + acq.sanityDelta, 0, next.maxSanity),
+          gold: Math.max(0, next.gold + acq.goldDelta),
+        };
+      } else if (item.kind === 'arcano') {
+        if (next.consumables.length >= next.consumableSlots) {
+          return illegal(state, 'sin slots de arcano');
+        }
+        next = { ...next, consumables: [...next.consumables, { defId: item.payloadId }] };
+      } else {
+        if (next.vouchers.includes(item.payloadId)) return illegal(state, 'ya tienes ese vale');
+        const v = voucherStatEffect(item.payloadId, registry);
+        const maxCandles = next.maxCandles + v.maxCandles;
+        const maxSanity = next.maxSanity + v.maxSanity;
+        next = {
+          ...next,
+          vouchers: [...next.vouchers, item.payloadId],
+          relicSlots: next.relicSlots + v.relicSlots,
+          consumableSlots: next.consumableSlots + v.consumableSlots,
+          maxCandles,
+          candles: next.candles + v.maxCandles,
+          maxSanity,
+          sanity: Math.min(maxSanity, next.sanity + v.maxSanity),
+          baseCombat: {
+            hands: next.baseCombat.hands + v.hands,
+            discards: next.baseCombat.discards + v.discards,
+            handSize: next.baseCombat.handSize + v.handSize,
+          },
+        };
+      }
+      const shop = { ...state.shop, items: state.shop.items.filter((i) => i.id !== item.id) };
+      return commit({ ...next, shop }, action);
+    }
+
+    case 'SELL_RELIC': {
+      const blocked = state.relics.some(
+        (r) => r.defId === 'relic.cadena' || r.defId === 'relic.usurero.avaricia',
+      );
+      if (blocked) return illegal(state, 'no puedes vender reliquias (Cadena/Avaricia)');
+      const idx = state.relics.findIndex((r) => r.defId === action.relicId);
+      if (idx === -1) return illegal(state, 'no tienes esa reliquia');
+      const def = registry.relics[action.relicId];
+      const refund = def ? Math.floor(def.cost * 0.5) : 0;
+      const relics = state.relics.filter((_, i) => i !== idx);
+      return commit({ ...state, relics, gold: state.gold + refund }, action);
+    }
+
+    case 'REROLL_SHOP': {
+      if (state.phase !== 'tienda' || !state.shop) return illegal(state, 'no estas en la tienda');
+      if (state.gold < state.shop.rerollCost) return illegal(state, 'oro insuficiente para reroll');
+      const sm = voucherShopMods(state.vouchers, registry);
+      const shopRng = cloneRngState(state.rng.shop);
+      const fresh = generateShop(registry, shopRng, {
+        sima: state.sima,
+        ownedRelicIds: new Set(state.relics.map((r) => r.defId)),
+        ownedVoucherIds: new Set(state.vouchers),
+        shopDiscount: sm.shopDiscount,
+        rerollDiscount: sm.rerollDiscount,
+        extraItems: sm.extraItems,
+      });
+      const shop = {
+        ...fresh,
+        rerollCost: state.shop.rerollCost + 1,
+        rerollsThisVisit: state.shop.rerollsThisVisit + 1,
+      };
+      return commit(
+        {
+          ...state,
+          gold: state.gold - state.shop.rerollCost,
+          rng: { ...state.rng, shop: shopRng },
+          shop,
+        },
+        action,
+      );
+    }
 
     default:
       return illegal(state, 'accion desconocida');

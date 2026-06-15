@@ -130,6 +130,31 @@ export function umbralEndGoldFactor(
   return factor;
 }
 
+/** Efecto de estadisticas de un vale (slots/velas/cordura/combate permanentes, §11.5). */
+export function voucherStatEffect(
+  id: string,
+  registry: ContentRegistry,
+): {
+  relicSlots: number;
+  consumableSlots: number;
+  maxCandles: number;
+  maxSanity: number;
+  hands: number;
+  discards: number;
+  handSize: number;
+} {
+  const e = registry.vouchers[id]?.effect;
+  return {
+    relicSlots: e?.relicSlots ?? 0,
+    consumableSlots: e?.consumableSlots ?? 0,
+    maxCandles: e?.maxCandles ?? 0,
+    maxSanity: e?.maxSanity ?? 0,
+    hands: e?.hands ?? 0,
+    discards: e?.discards ?? 0,
+    handSize: e?.handSize ?? 0,
+  };
+}
+
 /** Suma de modificadores de combate de todas las reliquias. */
 export function combatModifiers(
   relics: readonly RelicInstance[],

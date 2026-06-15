@@ -87,12 +87,14 @@ export interface CombatState {
 }
 
 // ---- Tienda / recompensa (placeholders serializables; contenido en Bloques 9/10) ----
-export type ShopItemKind = 'relic' | 'arcano' | 'mejora' | 'vale' | 'cierre';
+export type ShopItemKind = 'relic' | 'arcano' | 'vale';
 
 export interface ShopItem {
   id: string;
   kind: ShopItemKind;
   cost: number;
+  /** Id del contenido (reliquia/consumible/vale) que entrega. */
+  payloadId: string;
 }
 
 export interface ShopState {
