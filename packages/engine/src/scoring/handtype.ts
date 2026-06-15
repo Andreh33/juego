@@ -62,13 +62,14 @@ function groupByRank(cards: readonly RankedCard[]): RankedCard[][] {
   return [...groups.values()];
 }
 
-export function detectHand(played: readonly Card[]): DetectedHand {
+export function detectHand(played: readonly Card[], wildSuit = false): DetectedHand {
   const cards = played.filter(isRanked);
   if (cards.length === 0) return { type: 'carta_alta', scoring: new Set() };
 
   const n = cards.length;
   const groups = groupByRank(cards);
-  const isFlush = n === 5 && new Set(cards.map((c) => c.suit)).size === 1;
+  // wildSuit (Caleidoscopio): todos los palos cuentan como uno para el Color.
+  const isFlush = n === 5 && (wildSuit || new Set(cards.map((c) => c.suit)).size === 1);
   const straight = findStraight(cards);
 
   const five = groups.find((g) => g.length === 5);

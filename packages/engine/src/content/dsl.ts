@@ -9,7 +9,9 @@ export type ScalerTrigger =
   | { on: 'handPlayed'; handType?: HandType }
   | { on: 'cardScored' }
   | { on: 'discard' }
-  | { on: 'bossDefeated' };
+  | { on: 'bossDefeated' }
+  | { on: 'enhanced' } // al mejorar una carta (augurio)
+  | { on: 'cardDestroyed' }; // al destruir una carta
 
 export interface RelicDef {
   id: string;
@@ -23,11 +25,25 @@ export interface RelicDef {
   onCardScored?: Effect[];
   onHandPlayed?: Effect[];
   xMult?: Effect[];
-  retrigger?: { when: Condition; times: number };
+  retrigger?: { when: Condition; times: number; firstOnly?: boolean };
   // ---- Escaladora: crece durante el run (estado en RelicInstance.state.acc) ----
   scaler?: { trigger: ScalerTrigger; add: number; as: 'fichas' | 'mult' | 'xmult' };
   // ---- Modificadores de combate (al iniciar combate) ----
   modifyCombat?: { hands?: number; discards?: number; handSize?: number };
+  // ---- Modificadores GLOBALES del scoring (Igualador, Sin Fondo, Eternidad, Caleidoscopio) ----
+  cardChipOverride?: number;
+  noRetriggerCap?: boolean;
+  extraRetriggerPerSource?: number;
+  wildSuit?: boolean;
+  // ---- Hooks de run (§5.4) ----
+  /** Al obtener la reliquia (p.ej. -1 vela maxima). */
+  onAcquire?: { maxCandlesDelta?: number; sanityDelta?: number };
+  /** Al iniciar cada combate (Corona de Espinas, Sacrificio). */
+  onCombatStart?: { sanityDelta?: number; destroyRandomDeck?: number };
+  /** Al ganar un combate (Hambre). */
+  onCombatEnd?: { destroyRandomDeck?: number };
+  /** Al terminar un Umbral (Diezmo: factor de oro). */
+  onUmbralEnd?: { goldFactor?: number };
 }
 
 export type ConsumableKind = 'augurio' | 'sello' | 'conjuro';

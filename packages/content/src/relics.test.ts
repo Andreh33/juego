@@ -1,15 +1,18 @@
 import {
   applyScalersOnHandPlayed,
+  combatModifiers,
   type RelicInstance,
   reduce,
   type ScoreContext,
   scoreHand,
+  scoringModifiers,
   startRun,
   toScoringRelics,
+  umbralEndGoldFactor,
 } from '@umbral/engine';
 import type { Card, Enhancement, Rank, Seal, Suit } from '@umbral/shared';
 import { describe, expect, it } from 'vitest';
-import { REGISTRY } from './index';
+import { GENERAL_RELICS, REGISTRY } from './index';
 
 const CTX: ScoreContext = {
   gold: 0,
@@ -18,6 +21,14 @@ const CTX: ScoreContext = {
   bossesDefeated: 0,
   cardsInHandNotPlayed: 0,
   xmultRelics: 0,
+  deckCards: 52,
+  corduraLost: 0,
+  spectralRelics: 0,
+  enhancedCardsInHand: 0,
+  flatCardChips: null,
+  noRetriggerCap: false,
+  extraRetrigger: 0,
+  wildSuit: false,
 };
 
 let counter = 0;
@@ -163,5 +174,81 @@ describe('integracion con reduce: modificador de combate', () => {
     if (!node) return; // si la seed no tiene combate en fila 0, omitimos
     const after = reduce(withRelic, { type: 'CHOOSE_NODE', nodeId: node.id }, REGISTRY).state;
     expect(after.combat?.handsLeft).toBe(5); // 4 base + 1
+  });
+});
+
+describe('catalogo completo (§11.1)', () => {
+  it('hay 60 reliquias generales con id unico y campos validos', () => {
+    expect(GENERAL_RELICS).toHaveLength(60);
+    const ids = GENERAL_RELICS.map((r) => r.id);
+    expect(new Set(ids).size).toBe(60);
+    for (const r of GENERAL_RELICS) {
+      expect(r.name.length).toBeGreaterThan(0);
+      expect(r.flavor.length).toBeGreaterThan(0);
+      expect(r.cost).toBeGreaterThan(0);
+      expect(r.tags.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('cada arquetipo (§13.4) tiene apoyos', () => {
+    const tagCount = (t: string) => GENERAL_RELICS.filter((r) => r.tags.includes(t)).length;
+    for (const tag of ['mult', 'fichas', 'xmult', 'retrigger', 'escaladora', 'palo', 'cordura']) {
+      expect(tagCount(tag)).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
+describe('verbos nuevos del DSL (Bloque 9)', () => {
+  it('Igualador / Caleidoscopio / Eternidad / Sin Fondo via scoringModifiers', () => {
+    const mod = (id: string) => scoringModifiers([{ defId: id }], REGISTRY);
+    expect(mod('relic.igualador').flatCardChips).toBe(10);
+    expect(mod('relic.caleidoscopio').wildSuit).toBe(true);
+    expect(mod('relic.eternidad').extraRetrigger).toBe(1);
+    expect(mod('relic.sin_fondo').noRetriggerCap).toBe(true);
+    expect(mod('relic.simbiosis').spectralRelics).toBe(1);
+  });
+
+  it('Igualador: todas las cartas valen 10 fichas base', () => {
+    // Pareja de Ases: normalmente 11+11; con Igualador 10+10.
+    const r = scoreHand({
+      played: [mk('CALIZ', 14), mk('LLAVE', 14)],
+      handLevels: {},
+      context: { ...CTX, flatCardChips: 10 },
+    });
+    expect(r.fichas).toBe(30n); // pareja base 10 + 10 + 10
+  });
+
+  it('El Coleccionista Supremo: +5 fichas por carta del mazo', () => {
+    const r = scoreWith([mk('CALIZ', 13)], ['relic.el_coleccionista_supremo'], { deckCards: 52 });
+    // carta_alta: 5 + 10(K) + 5×52 = 275
+    expect(r.fichas).toBe(275n);
+  });
+
+  it('Corazon del Abismo: ×mult escala con la cordura perdida', () => {
+    const r = scoreWith([mk('CALIZ', 13)], ['relic.corazon_del_abismo'], { corduraLost: 20 });
+    // factor 1 + 20×0.05 = 2 ; carta_alta mult 1 ×2 = 2 ; fichas 15 ×2 = 30
+    expect(r.score).toBe(30);
+  });
+
+  it('Reloj Detenido: ×3 en 1a mano, ×0.75 despues', () => {
+    const first = scoreWith([mk('CALIZ', 13)], ['relic.reloj_detenido'], { isFirstHand: true });
+    const later = scoreWith([mk('CALIZ', 13)], ['relic.reloj_detenido'], { isFirstHand: false });
+    expect(first.score).toBe(45); // 15 ×3
+    expect(later.score).toBe(11); // floor(15 × 0.75)
+  });
+
+  it('Eco Hueco: re-dispara solo la PRIMERA carta puntuada', () => {
+    // Pareja: con Eco Hueco solo la 1a K se re-dispara (+10 fichas), no la 2a.
+    const r = scoreWith([mk('CALIZ', 13), mk('LLAVE', 13)], ['relic.eco_hueco']);
+    // base 10 + K(10)×2[eco] + K(10) = 10+20+10 = 40
+    expect(r.fichas).toBe(40n);
+  });
+
+  it('Pacto de Plomo: modifica el combate (-1 mano)', () => {
+    expect(combatModifiers([{ defId: 'relic.pacto_de_plomo' }], REGISTRY).hands).toBe(-1);
+  });
+
+  it('Diezmo: factor de oro de fin de Umbral 0.8', () => {
+    expect(umbralEndGoldFactor([{ defId: 'relic.diezmo' }], REGISTRY)).toBeCloseTo(0.8);
   });
 });

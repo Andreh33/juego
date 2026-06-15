@@ -59,6 +59,14 @@ const DEFAULT_CONTEXT: ScoreContext = {
   bossesDefeated: 0,
   cardsInHandNotPlayed: 0,
   xmultRelics: 0,
+  deckCards: 0,
+  corduraLost: 0,
+  spectralRelics: 0,
+  enhancedCardsInHand: 0,
+  flatCardChips: null,
+  noRetriggerCap: false,
+  extraRetrigger: 0,
+  wildSuit: false,
 };
 
 function isFigure(card: Card): boolean {
@@ -103,6 +111,8 @@ function evalCondition(
       return info.allFourSuits;
     case 'handHasFigure':
       return info.handHasFigure;
+    case 'hasSeal':
+      return card !== undefined && card.seal !== null;
     case 'not':
       return !evalCondition(cond.cond, card, acc, ctx, info);
   }
@@ -124,6 +134,14 @@ function countOf(ref: CountRef, ctx: ScoreContext, info: HandInfo): number {
       return ctx.xmultRelics;
     case 'bossesDefeated':
       return ctx.bossesDefeated;
+    case 'deckCards':
+      return ctx.deckCards;
+    case 'corduraLost':
+      return ctx.corduraLost;
+    case 'spectralRelics':
+      return ctx.spectralRelics;
+    case 'enhancedCardsInHand':
+      return ctx.enhancedCardsInHand;
   }
 }
 
@@ -187,7 +205,7 @@ export function scoreHand(input: ScoreInput): ScoreResult {
   const corduraMultBonus = input.corduraMultBonus ?? 0;
   const ctx = input.context ?? DEFAULT_CONTEXT;
 
-  const detected = detectHand(played);
+  const detected = detectHand(played, ctx.wildSuit);
   const level = handLevels[detected.type]?.level ?? 1;
   const base = baseForLevel(detected.type, level);
 
@@ -210,19 +228,29 @@ export function scoreHand(input: ScoreInput): ScoreResult {
     detected.scoring.has(card.id) || card.enhancement === 'piedra';
 
   // Paso 3: por cada carta puntuada, izquierda->derecha, con retriggers (§7.6).
+  let scoringIndex = 0;
   played.forEach((card, idx) => {
     if (!isScoring(card)) return;
+    const isFirstScoring = scoringIndex === 0;
+    scoringIndex++;
 
     let extra = card.seal === 'sangre' ? 1 : 0;
     for (const r of relics) {
-      if (r.retrigger && evalCondition(r.retrigger.when, card, acc, ctx, info)) {
-        extra += r.retrigger.times;
+      if (!r.retrigger) continue;
+      if (r.retrigger.firstOnly && !isFirstScoring) continue;
+      if (evalCondition(r.retrigger.when, card, acc, ctx, info)) {
+        extra += r.retrigger.times + ctx.extraRetrigger;
       }
     }
-    const triggers = Math.min(1 + extra, MAX_TRIGGERS);
+    const cap = ctx.noRetriggerCap ? Number.MAX_SAFE_INTEGER : MAX_TRIGGERS;
+    const triggers = Math.min(1 + extra, cap);
 
     const valueCard = card.enhancement === 'espejo' ? (played[idx - 1] ?? card) : card;
-    const chip = cardChipValue(valueCard);
+    // Igualador: todas las cartas con rango valen lo mismo; la Piedra mantiene su mejora.
+    const chip =
+      ctx.flatCardChips !== null && valueCard.rank !== null
+        ? ctx.flatCardChips
+        : cardChipValue(valueCard);
 
     for (let t = 0; t < triggers; t++) {
       acc.fichas += BigInt(chip); // 3a
