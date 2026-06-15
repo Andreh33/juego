@@ -35,6 +35,9 @@ importers:
       '@umbral/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@umbral/game-render':
+        specifier: workspace:*
+        version: link:../../packages/game-render
       '@umbral/shared':
         specifier: workspace:*
         version: link:../../packages/shared
