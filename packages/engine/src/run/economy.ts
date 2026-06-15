@@ -11,7 +11,7 @@ export function combatGoldReward(kind: ObjectiveKind): number {
 /** Oro por saltar la recompensa (§9.7). */
 export const SKIP_REWARD_GOLD = 6;
 
-/** Interes: +1 por cada 5 de oro en mano, tope +5 (§13.3). */
-export function interest(gold: number, cap = 5): number {
-  return Math.min(cap, Math.floor(Math.max(0, gold) / 5));
+/** Interes: +1 por cada `divisor` de oro en mano, tope `cap` (§13.3; Usurero usa divisor 4). */
+export function interest(gold: number, cap = 5, divisor = 5): number {
+  return Math.min(cap, Math.floor(Math.max(0, gold) / Math.max(1, divisor)));
 }

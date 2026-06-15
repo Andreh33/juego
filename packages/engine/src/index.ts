@@ -3,6 +3,7 @@ export * from './actions';
 export * from './content/dsl';
 export * from './content/interpret';
 export * from './content/pool';
+export * from './content/vessel';
 export * from './deck';
 export * from './defaults';
 export * from './events';

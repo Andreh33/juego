@@ -2,6 +2,8 @@
 import type { ContentRegistry } from '@umbral/engine';
 import { CONSUMABLES } from './consumables';
 import { GENERAL_RELICS } from './relics';
+import { VESSEL_RELICS } from './vessel-relics';
+import { VESSELS } from './vessels';
 
 function byId<T extends { id: string }>(items: readonly T[]): Record<string, T> {
   const out: Record<string, T> = {};
@@ -11,9 +13,12 @@ function byId<T extends { id: string }>(items: readonly T[]): Record<string, T> 
 
 /** Registro de contenido que se inyecta en el engine (reduce/replay). */
 export const REGISTRY: ContentRegistry = {
-  relics: byId(GENERAL_RELICS),
+  relics: byId([...GENERAL_RELICS, ...VESSEL_RELICS]),
   consumables: byId(CONSUMABLES),
+  vessels: byId(VESSELS),
 };
 
 export { CONSUMABLES } from './consumables';
 export { GENERAL_RELICS } from './relics';
+export { VESSEL_RELICS } from './vessel-relics';
+export { VESSELS } from './vessels';
