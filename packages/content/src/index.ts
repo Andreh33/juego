@@ -1,5 +1,6 @@
 // @umbral/content — TODO el contenido como data tipada. El engine lo interpreta (§5.4).
 import type { ContentRegistry } from '@umbral/engine';
+import { BOSSES } from './bosses';
 import { CONSUMABLES } from './consumables';
 import { GENERAL_RELICS } from './relics';
 import { VESSEL_RELICS } from './vessel-relics';
@@ -18,8 +19,10 @@ export const REGISTRY: ContentRegistry = {
   consumables: byId(CONSUMABLES),
   vessels: byId(VESSELS),
   vouchers: byId(VOUCHERS),
+  bosses: byId(BOSSES),
 };
 
+export { BOSSES } from './bosses';
 export { CONSUMABLES } from './consumables';
 export { GENERAL_RELICS } from './relics';
 export { VESSEL_RELICS } from './vessel-relics';

@@ -80,4 +80,11 @@ export interface ScoreContext {
   extraRetrigger: number;
   /** Trata todos los palos como uno para el Color (Caleidoscopio). */
   wildSuit: boolean;
+  // ---- Modificadores de JEFE (§11.7) ----
+  /** Palos silenciados: sus cartas no dan fichas (El Velado, La Senora). */
+  silencedSuits: Suit[];
+  /** Las figuras (J/Q/K) dan la mitad de fichas (La Dentellada). */
+  figuresHalf: boolean;
+  /** Penalizacion a los ×mult de reliquia (El Espejo Roto). */
+  relicXMultPenalty: number;
 }

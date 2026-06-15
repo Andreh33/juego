@@ -67,6 +67,9 @@ const DEFAULT_CONTEXT: ScoreContext = {
   noRetriggerCap: false,
   extraRetrigger: 0,
   wildSuit: false,
+  silencedSuits: [],
+  figuresHalf: false,
+  relicXMultPenalty: 0,
 };
 
 function isFigure(card: Card): boolean {
@@ -170,9 +173,12 @@ function applyEffect(
       acc.fichas = (acc.fichas * multToFixed(eff.factor)) / MULT_SCALE;
       break;
     case 'xMult': {
-      const factor = eff.perStep
+      const base = eff.perStep
         ? 1 + countOf(eff.perStep.per, ctx, info) * eff.perStep.step
         : eff.factor;
+      // El Espejo Roto (§11.7): los ×mult de reliquia se reducen (min 1). Solo si hay penalizacion,
+      // para no romper los ×mult intencionados < 1 (Eclipse ×0.5, Reloj Detenido ×0.75).
+      const factor = ctx.relicXMultPenalty > 0 ? Math.max(1, base - ctx.relicXMultPenalty) : base;
       acc.mult = xMultFixed(acc.mult, factor);
       break;
     }
@@ -247,10 +253,13 @@ export function scoreHand(input: ScoreInput): ScoreResult {
 
     const valueCard = card.enhancement === 'espejo' ? (played[idx - 1] ?? card) : card;
     // Igualador: todas las cartas con rango valen lo mismo; la Piedra mantiene su mejora.
-    const chip =
+    let chip =
       ctx.flatCardChips !== null && valueCard.rank !== null
         ? ctx.flatCardChips
         : cardChipValue(valueCard);
+    // Modificadores de jefe: palo silenciado -> 0 fichas; figuras a mitad.
+    if (valueCard.suit !== null && ctx.silencedSuits.includes(valueCard.suit)) chip = 0;
+    else if (ctx.figuresHalf && isFigure(valueCard)) chip = Math.floor(chip / 2);
 
     for (let t = 0; t < triggers; t++) {
       acc.fichas += BigInt(chip); // 3a

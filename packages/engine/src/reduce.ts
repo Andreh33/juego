@@ -202,8 +202,10 @@ function makeCombatFor(
   state: GameState,
   node: MapNode,
   registry: ContentRegistry,
+  bossDefId?: string,
 ): { rng: RngStreams; combat: CombatState } {
   const mod = combatModifiers(state.relics, registry);
+  const bossDef = bossDefId ? registry.bosses[bossDefId] : undefined;
   const handSize = Math.max(1, state.baseCombat.handSize + mod.handSize);
   const dealt = dealHand(
     state.rng,
@@ -213,21 +215,29 @@ function makeCombatFor(
   let objective = node.objective ?? 0;
   const vessel = registry.vessels[state.vessel];
   if (vessel) objective = Math.round(objective * vessel.objectiveFactor);
-  if (node.type === 'jefe') objective = Math.round(objective * bossObjectiveFactor(state.sanity));
+  if (node.type === 'jefe') {
+    objective = Math.round(objective * bossObjectiveFactor(state.sanity));
+    if (bossDef?.modifier.objectiveFactor) {
+      objective = Math.round(objective * bossDef.modifier.objectiveFactor);
+    }
+  }
+  const bossId = node.type === 'jefe' ? (bossDefId ?? `boss.${node.id}`) : `elite.${node.id}`;
   const combat: CombatState = {
     objective,
     accumulated: 0,
-    handsLeft: Math.max(1, state.baseCombat.hands + mod.hands),
-    discardsLeft: Math.max(0, state.baseCombat.discards + mod.discards),
+    handsLeft: Math.max(
+      1,
+      state.baseCombat.hands + mod.hands + (bossDef?.modifier.handsDelta ?? 0),
+    ),
+    discardsLeft: Math.max(
+      0,
+      state.baseCombat.discards + mod.discards + (bossDef?.modifier.discardsDelta ?? 0),
+    ),
     handSize,
     hand: dealt.hand,
     selected: [],
     drawPile: dealt.drawPile,
-    ...(node.type === 'jefe'
-      ? { bossId: `boss.${node.id}` }
-      : node.type === 'elite'
-        ? { bossId: `elite.${node.id}` }
-        : {}),
+    ...(node.type === 'jefe' || node.type === 'elite' ? { bossId } : {}),
   };
   return { rng: dealt.rng, combat };
 }
@@ -328,6 +338,7 @@ export function startRun(
     handLevels: initialHandLevels(),
     vouchers: [],
     runScore: 0,
+    usedBosses: [],
     map,
     combat: null,
     log: [action],
@@ -361,6 +372,7 @@ export function createBlankState(): GameState {
     handLevels: {},
     vouchers: [],
     runScore: 0,
+    usedBosses: [],
     map: null,
     combat: null,
     log: [],
@@ -396,22 +408,43 @@ export function reduce(
       };
 
       if (objectiveKindOf(node.type)) {
-        const cs = combatStartEffects(state.relics, registry);
         let base: GameState = { ...state, map };
+        // Seleccion de jefe: pool por Sima, sin repetir en el run (§11.7).
+        let bossDefId: string | undefined;
+        if (node.type === 'jefe') {
+          const poolSima = Math.min(3, state.sima);
+          const all = Object.values(registry.bosses).filter(
+            (b) => b.sima === poolSima && !b.secret,
+          );
+          const fresh = all.filter((b) => !state.usedBosses.includes(b.id));
+          const choices = fresh.length > 0 ? fresh : all;
+          if (choices.length > 0) {
+            const bossRng = cloneRngState(state.rng.boss);
+            const pick = choices[nextInt(bossRng, 0, choices.length - 1)];
+            base = { ...base, rng: { ...base.rng, boss: bossRng } };
+            if (pick) {
+              bossDefId = pick.id;
+              base = { ...base, usedBosses: [...state.usedBosses, pick.id] };
+            }
+          }
+        }
+        const cs = combatStartEffects(state.relics, registry);
+        const bossMod = bossDefId ? registry.bosses[bossDefId]?.modifier : undefined;
         if (cs.sanityDelta !== 0) {
           base = { ...base, sanity: clamp(base.sanity + cs.sanityDelta, 0, base.maxSanity) };
         }
-        if (cs.destroyRandomDeck > 0) {
-          const d = destroyRandomFromDeck(base.rng, base.deck, cs.destroyRandomDeck);
-          const destroyed = base.deck.length - d.deck.length;
+        const destroyN = cs.destroyRandomDeck + (bossMod?.destroyDeckAtStart ?? 0);
+        if (destroyN > 0) {
+          const before = base.deck.length;
+          const d = destroyRandomFromDeck(base.rng, base.deck, destroyN);
           base = {
             ...base,
             rng: d.rng,
             deck: d.deck,
-            relics: applyScalersOnDestroyed(base.relics, registry, destroyed),
+            relics: applyScalersOnDestroyed(base.relics, registry, before - d.deck.length),
           };
         }
-        const { rng, combat } = makeCombatFor(base, node, registry);
+        const { rng, combat } = makeCombatFor(base, node, registry, bossDefId);
         return commit({ ...base, rng, phase: 'combate', combat }, action);
       }
       switch (node.type) {
@@ -529,6 +562,7 @@ export function reduce(
         .filter((card): card is Card => card !== undefined);
       const startingHands = state.baseCombat.hands + combatModifiers(state.relics, registry).hands;
       const mods = scoringModifiers(state.relics, registry);
+      const bossMod = c.bossId ? registry.bosses[c.bossId]?.modifier : undefined;
       const context: ScoreContext = {
         gold: state.gold,
         sanity: state.sanity,
@@ -544,6 +578,9 @@ export function reduce(
         noRetriggerCap: mods.noRetriggerCap,
         extraRetrigger: mods.extraRetrigger,
         wildSuit: mods.wildSuit,
+        silencedSuits: bossMod?.silenceSuits ?? [],
+        figuresHalf: bossMod?.figuresHalf ?? false,
+        relicXMultPenalty: bossMod?.relicXMultPenalty ?? 0,
       };
       // --- Mecanica de Recipiente (§8) ---
       const vessel = registry.vessels[state.vessel];
@@ -583,8 +620,13 @@ export function reduce(
         context,
       });
       const accumulated = c.accumulated + result.score;
-      const gold = state.gold + result.coinsGained;
-      const sanity = clamp(state.sanity + result.sanityDelta, 0, state.maxSanity);
+      // Coste por mano del jefe (§11.7: El Vaho cordura, El Hambriento monedas).
+      const gold = Math.max(0, state.gold + result.coinsGained - (bossMod?.coinsPerHand ?? 0));
+      const sanity = clamp(
+        state.sanity + result.sanityDelta - (bossMod?.sanityPerHand ?? 0),
+        0,
+        state.maxSanity,
+      );
       const relics = applyScalersOnHandPlayed(
         state.relics,
         registry,
