@@ -1,8 +1,8 @@
 // GameAction — el unico modo de mutar el estado (§5.2). Event-sourcing: el action log
 // es la lista ordenada de acciones aplicadas (sin TICK) y reconstruye el run.
-import type { CardId, VesselId } from '@umbral/shared';
+import type { CardId, RunMode, VesselId } from '@umbral/shared';
 
-/** Mutadores de inicio de run (modo custom, §12.8). Se afinan en el Bloque 16. */
+/** Mutadores de inicio de run (modos custom/desafio, §12.7/§12.8). */
 export interface RunModifiers {
   startingCandles?: number;
   startingSanity?: number;
@@ -10,10 +10,24 @@ export interface RunModifiers {
   hands?: number;
   discards?: number;
   handSize?: number;
+  /** Tamano de mazo (recorta del mazo del Recipiente; Mazo Minimo, etc.). */
+  deckSize?: number;
+  /** Flags de desafio no expresables aun (noShop, soloEscaleras...). Se leen en bloques futuros. */
+  flags?: string[];
 }
 
 export type GameAction =
-  | { type: 'START_RUN'; seed: string; vessel: VesselId; ruleset: number; modifiers?: RunModifiers }
+  | {
+      type: 'START_RUN';
+      seed: string;
+      vessel: VesselId;
+      ruleset: number;
+      modifiers?: RunModifiers;
+      mode?: RunMode;
+      dailyDate?: string;
+      weeklyId?: string;
+      challengeId?: string;
+    }
   | { type: 'SELECT_CARD'; cardId: CardId }
   | { type: 'DESELECT_CARD'; cardId: CardId }
   | { type: 'REORDER_HAND'; order: CardId[] }
