@@ -29,6 +29,9 @@ importers:
       '@libsql/client':
         specifier: ^0.17.3
         version: 0.17.3
+      '@umbral/content':
+        specifier: workspace:*
+        version: link:../../packages/content
       '@umbral/engine':
         specifier: workspace:*
         version: link:../../packages/engine
