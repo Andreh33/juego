@@ -14,6 +14,8 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: str
 
 export function Hud({ state }: { state: GameState }) {
   const abandon = useGame((s) => s.abandon);
+  const muted = useGame((s) => s.muted);
+  const toggleMute = useGame((s) => s.toggleMute);
   const candles = '🕯'.repeat(Math.max(0, state.candles));
   return (
     <header className="flex w-full flex-wrap items-center justify-between gap-2 border-b border-umbral-ceniza/20 bg-umbral-tinta/80 px-4 py-2 backdrop-blur">
@@ -58,8 +60,16 @@ export function Hud({ state }: { state: GameState }) {
         ))}
         <button
           type="button"
+          onClick={toggleMute}
+          title={muted ? 'Activar sonido' : 'Silenciar'}
+          className="ml-2 rounded border border-umbral-ceniza/40 px-2 py-0.5 text-[10px] text-umbral-ceniza hover:text-umbral-hueso"
+        >
+          {muted ? '🔇' : '🔊'}
+        </button>
+        <button
+          type="button"
           onClick={abandon}
-          className="ml-2 rounded border border-umbral-sangre/50 px-2 py-0.5 text-[10px] text-umbral-ceniza hover:text-umbral-hueso"
+          className="rounded border border-umbral-sangre/50 px-2 py-0.5 text-[10px] text-umbral-ceniza hover:text-umbral-hueso"
         >
           Abandonar
         </button>

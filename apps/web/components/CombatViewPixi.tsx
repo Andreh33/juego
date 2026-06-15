@@ -35,6 +35,7 @@ const HAND_NAME: Record<string, string> = {
 
 export function CombatViewPixi({ state }: { state: GameState }) {
   const dispatch = useGame((s) => s.dispatch);
+  const events = useGame((s) => s.events);
   const c = state.combat;
   if (!c) return null;
   const byId = new Map(state.deck.map((card) => [card.id, card]));
@@ -103,7 +104,7 @@ export function CombatViewPixi({ state }: { state: GameState }) {
         )}
       </div>
 
-      <PixiCombat hand={hand} selectedIds={c.selected} onToggle={onToggle} />
+      <PixiCombat hand={hand} selectedIds={c.selected} onToggle={onToggle} events={events} />
 
       {state.consumables.length > 0 ? (
         <div className="flex flex-wrap items-center justify-center gap-2">

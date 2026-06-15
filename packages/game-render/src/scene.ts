@@ -1,9 +1,11 @@
 // Escena de combate en PixiJS v8 (§17.11/§17.13): lee snapshots del engine y dibuja la mano,
 // con reparto/selección/tilt animados a 60fps. CERO reglas de juego: emite onToggle(cardId) y el
 // engine (via el store) decide. La capa de acciones (jugar/descartar) y el HUD viven en React.
+import type { FeelEvent } from '@umbral/engine';
 import type { Card } from '@umbral/shared';
-import { Application, Container } from 'pixi.js';
+import { Application, Container, Text, TextStyle } from 'pixi.js';
 import { CARD_H, CARD_W, CardView } from './card';
+import { COLORS } from './materials';
 
 export interface CombatSnapshot {
   hand: Card[];
@@ -14,8 +16,15 @@ export interface CombatHandlers {
 }
 export interface CombatController {
   sync: (snap: CombatSnapshot, handlers: CombatHandlers) => void;
+  /** Reproduce el juice de los FeelEvent del engine (scorePop, shake...). */
+  feel: (events: readonly FeelEvent[]) => void;
   resize: (w: number, h: number) => void;
   destroy: () => void;
+}
+
+interface Pop {
+  text: Text;
+  life: number;
 }
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -40,11 +49,34 @@ export async function mountCombatScene(
   hand.sortableChildren = true;
   app.stage.addChild(hand);
 
+  const fxLayer = new Container();
+  app.stage.addChild(fxLayer);
+
   const views = new Map<string, CardView>();
   const targets = new Map<string, { x: number; y: number }>();
+  const pops: Pop[] = [];
+  let shake = 0;
   let w = width;
   let h = height;
   let onToggle: (id: string) => void = () => {};
+
+  function feel(events: readonly FeelEvent[]): void {
+    for (const e of events) {
+      if (e.t === 'scorePop') {
+        const text = new Text({
+          text: `+${Math.round(e.total).toLocaleString()}`,
+          style: new TextStyle({ fill: COLORS.ocreAlto, fontSize: 40, fontWeight: '800' }),
+        });
+        text.anchor.set(0.5);
+        text.position.set(w / 2, h * 0.42);
+        fxLayer.addChild(text);
+        pops.push({ text, life: 1 });
+        shake = Math.max(shake, 6);
+      } else if (e.t === 'shake') {
+        shake = Math.max(shake, Math.min(16, e.intensity * 4));
+      }
+    }
+  }
 
   function layout(): void {
     const ids = [...views.keys()];
@@ -120,10 +152,34 @@ export async function mountCombatScene(
       }
       v.tick(dt);
     }
+    // Shake de pantalla (decae).
+    if (shake > 0.1) {
+      hand.x = (Math.random() - 0.5) * shake;
+      hand.y = (Math.random() - 0.5) * shake;
+      shake *= 0.85 ** dt;
+    } else {
+      hand.x = 0;
+      hand.y = 0;
+      shake = 0;
+    }
+    // Score pops: suben y se desvanecen.
+    for (let i = pops.length - 1; i >= 0; i--) {
+      const p = pops[i];
+      if (!p) continue;
+      p.life -= 0.02 * dt;
+      p.text.y -= 0.8 * dt;
+      p.text.alpha = Math.max(0, p.life);
+      p.text.scale.set(1 + (1 - p.life) * 0.3);
+      if (p.life <= 0) {
+        p.text.destroy();
+        pops.splice(i, 1);
+      }
+    }
   });
 
   return {
     sync,
+    feel,
     resize: (nw, nh) => {
       w = nw;
       h = nh;
