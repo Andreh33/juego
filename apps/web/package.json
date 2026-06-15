@@ -11,13 +11,13 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@supabase/ssr": "^0",
-    "@supabase/supabase-js": "^2",
+    "@libsql/client": "^0.17.3",
     "@umbral/engine": "workspace:*",
     "@umbral/shared": "workspace:*",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19",
+    "zod": "^4",
     "zustand": "^5"
   },
   "devDependencies": {
